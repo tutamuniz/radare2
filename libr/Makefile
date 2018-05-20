@@ -1,178 +1,235 @@
 include ../global.mk
 include config.mk
+include ../config-user.mk
+include ../mk/platform.mk
 include ../mk/${COMPILER}.mk
 
+DESTDIR:=$(DESTDIR)
 PREFIX?=${PWD}/../prefix
-PFX=${DESTDIR}/${PREFIX}
-LFX=${DESTDIR}/${LIBDIR}
-IFX=${DESTDIR}/${INCLUDEDIR}
+OBJCOPY?=objcopy
+
+S=$
+B=`
 PWD=$(shell pwd)
 
 LIBS0=util hash
-LIBS1=reg cons db magic diff bp search config socket
-LIBS2=syscall cmd lang io crypto flags bin
-LIBS3=fs anal
-LIBS4=parse
-LIBS5=asm debug
-LIBS6=egg
-#LIBS6+=print
+LIBS1=socket reg cons magic bp search config
+LIBS2=syscall lang io crypto flag
+LIBS3=fs anal bin parse
+LIBS4=asm
+LIBS5=egg
+LIBS6=debug
 LIBS7=core
 
 LIBS=$(LIBS0) $(LIBS1) $(LIBS2) $(LIBS3) $(LIBS4) $(LIBS5) $(LIBS6) $(LIBS7)
 .PHONY: $(LIBS)
 
 all:
-	${MAKE} $(LIBS0)
-	${MAKE} $(LIBS1)
-	${MAKE} $(LIBS2)
-	${MAKE} $(LIBS3)
-	${MAKE} $(LIBS4)
-	${MAKE} $(LIBS5)
-	${MAKE} $(LIBS6)
-	${MAKE} $(LIBS7)
-ifeq (${WITHNONPIC},1)
-	${MAKE} libr.a
-endif
+	$(MAKE) $(LIBS0)
+	$(MAKE) $(LIBS1)
+	$(MAKE) $(LIBS2)
+	$(MAKE) $(LIBS3)
+	$(MAKE) $(LIBS4)
+	$(MAKE) $(LIBS5)
+	$(MAKE) $(LIBS6)
+	$(MAKE) $(LIBS7)
+	$(MAKE) libr.${EXT_AR}
+	$(MAKE) libr.${EXT_SO}
 
-# looks hacky :D
-#AR=arm-linux-androideabi-ar
-libr.a:
+ifeq ($(BUILD_MERGED),1)
+
+ifeq ($(OSTYPE),darwin)
+MLFLAGS+=-install_name @rpath/libr2.dylib
+endif
+ifeq ($(OSTYPE),ios)
+MLFLAGS+=-install_name @rpath/libr2.dylib
+endif
+# XXX version-script only works with shlib as output
+#ifeq ($(OSTYPE),linux)
+#PLFLAGS+=--version-script ./ld.script
+#endif
+# from env: ALFLAGS+=$(ALFLAGS)
+
+.libr: $(wildcard */libr_*.${EXT_AR}) ../shlr/libr_shlr.${EXT_AR}
 	rm -rf .libr
 	mkdir .libr
-	for a in */libr_*.a ; do \
-		mkdir -p .libr/$$a ; \
-		cp -f $$a .libr/$$a ; \
-		(cd .libr/$$a ; ${AR} x *.a ; rm -f *.a ) ; \
-		done
-	${AR} qv libr.a `find .libr/ | grep '\\.o$$'`
-	rm -rf .libr
+	for LIB in $^ ; do \
+		${PARTIALLD} $(ALFLAGS) $(MLFLAGS) $(PLFLAGS) -o .libr/$$(basename $${LIB} .a).o $${LIB} ; \
+	done
+ifeq ($(OSTYPE),linux)
+	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+endif
+ifeq ($(OSTYPE),gnulinux)
+	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+endif
+ifeq ($(OSTYPE),android)
+	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+endif
 
-gnu_libr.a: $(shell ls */libr_*.a 2>/dev/null)
-	rm -f libr.a
-	echo CREATE libr.a > libr.m
-	for a in */libr_*.a ; do echo ADDLIB $$a >> libr.m ; done
-	echo SAVE >> libr.m
-	# ar -M is a gnu-ism .. try to find a proper portable way to do that
-	${CC_AR} -M < libr.m
-	rm -f libr.m
+libr.${EXT_AR}: .libr
+	${AR} crs $@ .libr/*.o
+
+E+=../shlr/ar/libr_ar.${EXT_AR}
+E+=../shlr/grub/libgrubfs.${EXT_AR}
+E+=../shlr/windbg/libr_windbg.${EXT_AR}
+E+=../shlr/qnx/lib/libqnxr.${EXT_AR}
+E+=../shlr/bochs/lib/libbochs.${EXT_AR}
+#ifeq ($(COMPILER),ios-sdk)
+#E+=../shlr/sdb/src/libsdb.${EXT_AR}
+#endif
+#ifneq ($(OSTYPE),android)
+#E+=../shlr/sdb/src/libsdb.${EXT_AR}
+#endif
+
+libr.${EXT_SO}: .libr
+	$(CC) -fvisibility=hidden $(MLFLAGS) -shared -dynamiclib -o libr.${EXT_SO}  \
+		.libr/*.o \
+		../shlr/gdb/lib/libgdbr.${EXT_AR} ../shlr/java/libr_java.${EXT_AR} \
+		../shlr/zip/librz.${EXT_AR} \
+		../shlr/libr_shlr.${EXT_AR} $(E)\
+		../shlr/capstone/libcapstone.${EXT_AR}
+
+else
+
+# BUILD_MERGED=0
+
+libr.${EXT_SO}:
+	$(MAKE) libr.${EXT_SO} BUILD_MERGED=1
+
+libr.${EXT_AR}:
+	$(MAKE) libr.${EXT_AR} BUILD_MERGED=1
+endif
+
+../shlr/libr_shlr.${EXT_AR}:
+	$(MAKE) -C ../shlr libr_shlr.${EXT_AR}
 
 $(LIBS):
 	@echo "DIR $@"
-	@${MAKE} -C $@
+	@$(MAKE) -C $@
 
 pkgcfg:
-	@for lib in ${LIBS}; do ( cd $${lib} && ${MAKE} pkgcfg ); done
-	cd asm && ${MAKE} pkgcfg NAME=libr DEPS="r_`echo ${LIBS}|sed -e 's, , r_,g'`"
+	@for lib in ${LIBS}; do $(MAKE) -C $${lib} pkgcfg; done
+	$(MAKE) -C asm pkgcfg NAME=libr DEPS="r_`echo ${LIBS}|sed -e 's, , r_,g'`"
 	# TODO: Magically generate libr.pc.acr here using LIBS and so :)
 
 install-pkgconfig:
-	${INSTALL_DIR} ${LFX}/pkgconfig
-	for a in ../pkgcfg/*.pc ; do ${INSTALL_DATA} $$a ${LFX}/pkgconfig ; done
+	${INSTALL_DIR} "${DESTDIR}${LIBDIR}/pkgconfig"
+	for FILE in ../pkgcfg/*.pc ; do \
+		rm -f "${DESTDIR}${LIBDIR}/pkgconfig/$$FILE" ; \
+		${INSTALL_DATA} $$FILE "${DESTDIR}${LIBDIR}/pkgconfig" ; done
 
 install-includes:
-	${INSTALL_DIR} ${IFX}/libr
-	(cd include && for a in *.h ; do ${INSTALL_DATA} $$a ${IFX}/libr ; done)
-	${INSTALL_DIR} ${IFX}/libr/sflib
-	(cd include/sflib && for a in * ; do \
-		${INSTALL_DIR} ${IFX}/libr/sflib/$$a ; \
-		for b in $$a/*.h ; do \
-			${INSTALL_DATA} $$b ${IFX}/libr/sflib/$$b ; \
+	@-rm -f "${DESTDIR}${INCLUDEDIR}/libr/sflib"
+	@-rm -f "${DESTDIR}${INCLUDEDIR}/libr"
+	${INSTALL_DIR} "${DESTDIR}${INCLUDEDIR}/libr"
+	(cd include && for FILE in *.h ; do ${INSTALL_DATA} $$FILE "${DESTDIR}${INCLUDEDIR}/libr" ; done)
+	${INSTALL_DIR} "${DESTDIR}${INCLUDEDIR}/libr/sflib"
+	(cd include/sflib && for DIR in * ; do \
+		${INSTALL_DIR} "${DESTDIR}${INCLUDEDIR}/libr/sflib/$$DIR" ; \
+		for FILE in $$DIR/*.h ; do \
+			${INSTALL_DATA} $$FILE "${DESTDIR}${INCLUDEDIR}/libr/sflib/$$FILE" ; \
 		done ; \
 	done)
-	${INSTALL_DIR} ${IFX}/libr/sdb
-	(cd include/sdb && for a in * ; do \
-		${INSTALL_DATA} $$a ${IFX}/libr/sdb/$$a ; \
+	${INSTALL_DIR} "${DESTDIR}${INCLUDEDIR}/libr/sdb"
+	(cd include/sdb && for FILE in * ; do \
+		${INSTALL_DATA} $$FILE "${DESTDIR}${INCLUDEDIR}/libr/sdb/$$FILE" ; \
+	done)
+	${INSTALL_DIR} "${DESTDIR}${INCLUDEDIR}/libr/r_util"
+	(cd include/r_util && for FILE in * ; do \
+		${INSTALL_DATA} $$FILE "${DESTDIR}${INCLUDEDIR}/libr/r_util/$$FILE" ; \
 	done)
 
 symstall install-symlink:
-	mkdir -p ${PFX}/bin ${IFX} ${LFX}/pkgconfig ${LFX}/radare2/${VERSION}
-	rm -rf ${IFX}/libr && ln -fs ${PWD}/include ${IFX}/libr
-	cd ../pkgcfg && for a in *.pc ; do \
-		if [ -e ${PWD}/../pkgcfg/$${a} ] ; then \
-			ln -fs ${PWD}/../pkgcfg/$${a} ${LFX}/pkgconfig/$${a} ; \
-		fi ; \
-	done
-	for a in ${LIBS} ; do \
-		ln -fs ${PWD}/$${a}/libr_$${a}.${EXT_SO} ${LFX}/libr_$${a}.${EXT_SO} ; \
-		ln -fs ${PWD}/$${a}/libr_$${a}.${EXT_SO} ${LFX}/libr_$${a}.${EXT_SO}.${LIBVERSION} ; \
-		ln -fs ${PWD}/$${a}/libr_$${a}.${EXT_AR} ${LFX}/libr_$${a}.${EXT_AR} ; \
-		for b in $${a}/p/*.${EXT_SO} ; do \
-			if [ -e ${PWD}/$${b} ] ; then \
-				ln -fs ${PWD}/$${b} ${LFX}/radare2/${VERSION}/ ; \
-			fi ; \
-		done ; \
-		( cd ${LFX}/radare2 ; ln -fs ${VERSION} last ) ; \
-	done
+	@cd .. && \
+	mkdir -p "${DESTDIR}${BINDIR}" \
+		"${DESTDIR}${INCLUDEDIR}" \
+		"${DESTDIR}${LIBDIR}/pkgconfig" \
+		"${DESTDIR}${LIBDIR}/radare2/${VERSION}" ; \
+	rm -rf "${DESTDIR}${INCLUDEDIR}/libr" && ln -fs "${PWD}/include" "${DESTDIR}${INCLUDEDIR}/libr" ; \
+	$(MAKE) install-pkgconfig-symlink ; \
+	$(foreach lib,${LIBS}, \
+	  ln -fs "${PWD}/$(lib)/libr_$(lib).${EXT_SO}" \
+		"${DESTDIR}${LIBDIR}/libr_$(lib).${EXT_SO}" ; \
+	  ln -fs "${PWD}/$(lib)/libr_$(lib).${EXT_SO}" \
+		"${DESTDIR}${LIBDIR}/$(call libname-version,libr_$(lib).${EXT_SO},${LIBVERSION})" ; \
+	  ln -fs "${PWD}/$(lib)/libr_$(lib).${EXT_AR}" "${DESTDIR}${LIBDIR}/libr_$(lib).${EXT_AR}" ; \
+	  $(foreach module,$(wildcard $(lib)/p/*.${EXT_SO}), \
+	    ln -fs "${PWD}/$(module)" "${DESTDIR}${LIBDIR}/radare2/${VERSION}/" ; \
+	  ) \
+	) \
+	cd "${DESTDIR}${LIBDIR}/radare2" ; rm -f last ; ln -fs "${VERSION}" last
 
 install: install-includes install-pkgconfig
 	# TODO :Use INSTALL_DATA_DIR instead of mkdir
 	# libraries
-	@${INSTALL_DIR} ${LFX}
-	@for a in `find * -type f | grep -e '\.${EXT_SO}$$' | grep -Ev '(lib|parse)/t/' | grep lib | grep -v /bin/ | grep -v /p/` ; do \
-	  b=`echo $$a|cut -d / -f 2`; \
-	  echo " ${LFX}/$$b.${LIBVERSION}"; \
-	  ${INSTALL_LIB} $$a ${LFX}/$$b.${LIBVERSION} ; \
-	  ( cd ${LFX} ; ln -fs $$b.${LIBVERSION} $$b ) ; \
-	done
+	@${INSTALL_DIR} "${DESTDIR}${LIBDIR}"
+	@$(foreach lib,$(shell find * -type f -iname "*.${EXT_SO}" | grep -v 'libr\.' | grep -v '(lib|parse)/t/' | grep lib | grep -v /bin/ | grep -v /p/), \
+	  echo " ${DESTDIR}${LIBDIR}/$(call libpath-to-name-version,$(lib),${LIBVERSION})"; \
+	  rm -f "${DESTDIR}${LIBDIR}/$(call libpath-to-name-version,$(lib),${LIBVERSION})"; \
+	  ${INSTALL_LIB} "$(lib)" "${DESTDIR}${LIBDIR}/$(call libpath-to-name-version,$(lib),${LIBVERSION})"; \
+	  ( cd "${DESTDIR}${LIBDIR}" ; ln -fs "$(call libpath-to-name-version,$(lib),${LIBVERSION})" "$(call libpath-to-name,$(lib))" ) ; \
+	)
 	# object archives
-	@for a in `find * -type f | grep -e '\.a$$' | grep -v fs/p` ; do \
-	  echo " ${LFX}/$$a"; ${INSTALL_DATA} $$a ${LFX} ; done
+	@for FILE in `find * -type f -iname "*.${EXT_AR}" | grep -v fs/p` ; do \
+	  echo " ${DESTDIR}${LIBDIR}/$$FILE"; ${INSTALL_DATA} $$FILE "${DESTDIR}${LIBDIR}" ; done || true
 	# plugins
-	@${INSTALL_DIR} ${LFX}/radare2/${VERSION}
-	@for a in `find */p -perm -u+x -type f | grep -v exe | grep -v dll | grep ${EXT_SO}`; \
-	  do echo " ${LFX}/radare2/${VERSION}/$$a"; \
-	${INSTALL_DATA} $$a ${LFX}/radare2/${VERSION} ; done
-	cd ${LFX}/radare2 ; ln -fs ${VERSION} last
+	@${INSTALL_DIR} "${DESTDIR}${LIBDIR}/radare2/${VERSION}"
+	@for FILE in `find */p -perm -u+x -type f | grep -v exe | grep -v dll | grep ${EXT_SO}`; \
+	  do echo " ${DESTDIR}${LIBDIR}/radare2/${VERSION}/$$FILE"; \
+	  ${INSTALL_LIB} "$$FILE" "${DESTDIR}${LIBDIR}/radare2/${VERSION}" ; done
+	cd "${DESTDIR}${LIBDIR}/radare2" ; ln -fs "${VERSION}" last
 
-#@echo "lang/p/radare.* ${DESTDIR}/${PFX}/${LIBDIR}/radare2/${VERSION}"
-#${INSTALL_DATA} lang/p/radare.* ${LFX}/radare2/${VERSION}
+#@echo "lang/p/radare.* ${DESTDIR}${DESTDIR}${PREFIX}/${LIBDIR}/radare2/${VERSION}"
+#${INSTALL_DATA} lang/p/radare.* ${DESTDIR}${LIBDIR}/radare2/${VERSION}
 
 deinstall uninstall:
 	# libraries
-	-@for a in `find * | grep -e '\.${EXT_SO}$$' | grep -v 'lib/t' | grep lib` ; do \
-	a=`echo $$a | awk -F / '{ print $$NF; }'`; \
-	echo ${LFX}/$$a ; rm -f ${LFX}/$$a ; done
+	-@for FILE in `find * | grep -e '\.${EXT_SO}$$' | grep -v 'lib/t' | grep lib` ; do \
+	FILE=`echo $$FILE | awk -F / '{ print $$NF; }'`; \
+	echo "${DESTDIR}${LIBDIR}/$$FILE" ; rm -f "${DESTDIR}${LIBDIR}/$$FILE" ; done
 	# object archives
-	-@for a in `find * | grep -e '\.a$$'` ; do \
-	a=`echo $$a | awk -F / '{ print $$NF; }'`; \
-	echo ${LFX}/$$a ; rm -f ${LFX}/$$a ; done
+	-@for FILE in `find * | grep -e '\.${EXT_AR}$$'` ; do \
+	FILE=`echo $$FILE | awk -F / '{ print $$NF; }'`; \
+	echo "${DESTDIR}${LIBDIR}/$$FILE" ; rm -f "${DESTDIR}${LIBDIR}/$$FILE" ; done
 	# includes
-	-if [ -h ${IFX}/libr ]; then \
-		rm -f ${IFX}/libr ; \
+	-if [ -h "${DESTDIR}${INCLUDEDIR}/libr" ]; then \
+		rm -f "${DESTDIR}${INCLUDEDIR}/libr" ; \
 	else \
-		(cd include && for a in * ; do rm -f ${IFX}/libr/$$a ; done) ; \
+		(cd include && for FILE in * ; do rm -f "${DESTDIR}${INCLUDEDIR}/libr/$$FILE" ; done) ; \
 	fi
 	# programs
-	-@for a in `find */t -perm -u+x -type f | grep 2`; do \
-	a=`echo $$a|awk -F / '{ print $$NF; }'`; \
-	echo ${PFX}/bin/$$a ; rm -f ${PFX}/bin/$$a ; done
+	-@for FILE in `find */t -perm -u+x -type f | grep 2`; do \
+	FILE=`echo $$FILE|awk -F / '{ print $$NF; }'`; \
+	echo "${DESTDIR}${BINDIR}/$$FILE" ; rm -f "${DESTDIR}${BINDIR}/$$FILE" ; done
 	# plugins
-	-@for a in `find */p -perm -u+x -type f`; do \
-	a="${LFX}/radare2/${VERSION}/`echo $$a|awk -F / '{ print $$NF; }'`"; \
-	echo $$a ; rm -f $$a ; done
-	rm -rf ${LFX}/radare2/${VERSION}
-	rm -f ${LFX}/pkgconfig/libr.pc
-	rm -f ${LFX}/pkgconfig/r_*.pc
+	-@for FILE in `find */p -perm -u+x -type f`; do \
+	FILE="${DESTDIR}${LIBDIR}/radare2/${VERSION}/`echo $$FILE|awk -F / '{ print $$NF; }'`"; \
+	echo $$FILE ; rm -f $$FILE ; done
+	rm -rf "${DESTDIR}${LIBDIR}/radare2/${VERSION}"
+	rm -f "${DESTDIR}${LIBDIR}/pkgconfig/libr.pc"
+	rm -f "${DESTDIR}${LIBDIR}/pkgconfig/r_"*.pc
 	# test programs
-	rm -rf ${PFX}/bin/libr-test
-	# TODO: use for a in LIBS (like in binr/Makefile)
-	rm -rf ${IFX}/libr
-	rm -rf ${LFX}/libr_*.so.${LIBVERSION}
-	rm -rf ${LFX}/libr_*.so.0
-	rm -rf ${LFX}/libr_*.so
-	rm -rf ${LFX}/libr_*.a
-	rm -rf ${LFX}/libr2.so*
-	rm -rf ${LFX}/libr2.a
-	rm -rf ${LFX}/libr.so*
-	rm -rf ${LFX}/libr.a
-	rm -rf ${DESTDIR}${DATADIR}/share/doc/radare2
-	@echo libr aka radare2 has been uninstalled from PREFIX=${PFX}
+	rm -rf "${DESTDIR}${BINDIR}/libr-test"
+	# TODO: use for FILE in LIBS (like in binr/Makefile)
+	rm -rf "${DESTDIR}${INCLUDEDIR}/libr"
+	rm -rf "${DESTDIR}${LIBDIR}/libr_*.so.${LIBVERSION}"
+	rm -rf "${DESTDIR}${LIBDIR}/libr_*.so.0"
+	rm -rf "${DESTDIR}${LIBDIR}/libr_*.so"
+	rm -rf "${DESTDIR}${LIBDIR}/libr_*.${EXT_AR}"
+	rm -rf "${DESTDIR}${LIBDIR}/libr2.so"*
+	rm -rf "${DESTDIR}${LIBDIR}/libr2.${EXT_AR}"
+	rm -rf "${DESTDIR}${LIBDIR}/libr.so"*
+	rm -rf "${DESTDIR}${LIBDIR}/libr.${EXT_AR}"
+	rm -rf "${DESTDIR}${DATADIR}/doc/radare2"
+	@echo libr aka radare2 has been uninstalled from PREFIX=${DESTDIR}${PREFIX}
 
 clean:
-	for lib in ${LIBS}; do ( cd $${lib} && ${MAKE} clean ); done
+	for LIB in ${LIBS}; do ( cd $${LIB} && $(MAKE) clean ); done
+	rm -rf .libr libr.${LIB_SO} libr.${LIB_AR}
 
 mrproper:
-	for lib in ${LIBS}; do ( cd $${lib} && ${MAKE} mrproper ); done
+	rm -rf .libr libr.${LIB_SO} libr.${LIB_AR}
+	for LIB in ${LIBS}; do ( cd $${LIB} && $(MAKE) mrproper ); done
 
 .PHONY: sloc mrproper clean pkgcfg install deinstall uninstall libr
 .PHONY: install-includes install-pkgconfig install-symlink all

@@ -1,18 +1,16 @@
 include ../../config.mk
-# XXX
-CFLAGS=-I../../include -I../arch/ -I../arch/include -Wall -shared -fPIC ${LDFLAGS_LIB} ${LDFLAGS_LINKPATH}..
+include ../../../mk/platform.mk
+
+LINK+=-L../../util -lr_util
 LDFLAGS+=${LINK}
 
-caca:
-
-foo: all
+ifeq ($(WITHPIC),1)
+all: ${ALL_TARGETS}
 
 ALL_TARGETS=
-ALGOS=aes.mk
+CFLAGS+=-I../../include
+#ALGOS=aes.mk aes_cbc.mk
 include $(ALGOS)
-
-all: ${ALL_TARGETS}
-	@true
 
 clean:
 	-rm -f *.${EXT_SO} *.o ${STATIC_OBJ}
@@ -20,4 +18,9 @@ clean:
 mrproper: clean
 	-rm -f *.d
 
-.PHONY: all clean foo mrproper
+.PHONY: all clean mrproper
+else
+all clean mrproper:
+
+.PHONY: all clean mrproper
+endif

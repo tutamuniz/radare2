@@ -38,10 +38,11 @@
 
 #include <stdlib.h>
   /*
-    warning: implicit declaration of function `printf_unfiltered'
+    warning: implicit declaration of function `eprintf'
     if dbg is 1 then this definition is required
   */
-  void printf_unfiltered (const char *,...);
+//#define eprintf(x,y...) fprintf(stderr,x,##y)
+#include "r_types.h"
 
 #ifndef dbg
 #define dbg (0)
@@ -119,7 +120,6 @@ typedef enum
 	  is_limm++;				\
 	  field##isReg = 0;			\
 	  PUT_NEXT_WORD_IN (field);		\
-	  limm_value = field;			\
 	}					\
       else if (field > 60)			\
 	{					\
@@ -159,7 +159,7 @@ typedef enum
     }						\
   while (0)
 
-#define IS_SMALL(x)                 (((field##x) < 256) && ((field##x) > -257))
+#define IS_SMALL(x)                 (((field##x) < 10) && ((field##x) >= 0))
 #define IS_REG(x)                    (field##x##isReg)
 #define WRITE_FORMAT_LB_Rx_RB(x)     WRITE_FORMAT (x, "[","]","","")
 #define WRITE_FORMAT_x_COMMA_LB(x)   WRITE_FORMAT (x, "",", [","",", [")
@@ -179,8 +179,6 @@ typedef enum
 #define NEXT_WORD(x)	(offset += 4, state->words[x])
 
 #define add_target(x)	(state->targets[state->tcnt++] = (x))
-
-static char comment_prefix[] = " ; ";
 
 static const char *
 core_reg_name (struct arcDisState * state, int val)
@@ -250,7 +248,6 @@ arc_sprintf (struct arcDisState *state, char *buf, const char *format, ...)
   char *bp;
   const char *p;
   int size, leading_zero, regMap[2];
-  long auxNum;
   va_list ap;
 
   va_start (ap, format);
@@ -258,7 +255,6 @@ arc_sprintf (struct arcDisState *state, char *buf, const char *format, ...)
   bp = buf;
   *bp = 0;
   p = format;
-  auxNum = -1;
   regMap[0] = 0;
   regMap[1] = 0;
 
@@ -408,38 +404,6 @@ arc_sprintf (struct arcDisState *state, char *buf, const char *format, ...)
   va_end (ap);
 }
 
-static void
-write_comments_(struct arcDisState * state,
-		int shimm,
-		int is_limm,
-		long limm_value)
-{
-  if (state->commentBuffer != 0)
-    {
-      int i;
-
-      if (is_limm)
-	{
-	  const char *name = post_address (state, limm_value + shimm);
-
-	  if (*name != 0)
-	    WRITE_COMMENT (name);
-	}
-      for (i = 0; i < state->commNum; i++)
-	{
-	  if (i == 0)
-	    strcpy (state->commentBuffer, comment_prefix);
-	  else
-	    strcat (state->commentBuffer, ", ");
-	  strncat (state->commentBuffer, state->comm[i],
-		   sizeof (state->commentBuffer));
-	}
-    }
-}
-
-#define write_comments2(x) write_comments_ (state, x, is_limm, limm_value)
-#define write_comments()   write_comments2 (0)
-
 static const char *condName[] =
 {
   /* 0..15.  */
@@ -457,7 +421,7 @@ write_instr_name_(struct arcDisState * state,
 		  int addrWriteBack,
 		  int directMem)
 {
-  strcpy (state->instrBuffer, instrName);
+  strncpy (state->instrBuffer, instrName, sizeof (state->instrBuffer)-1);
   if (cond > 0)
     {
       const char *cc = 0;
@@ -522,7 +486,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
   int fieldAisReg = 1, fieldBisReg = 1, fieldCisReg = 1;
   int fieldA, fieldB, fieldC = 0;
   int flag = 0, cond = 0, is_shimm = 0, is_limm = 0;
-  long limm_value = 0;
   int signExtend = 0, addrWriteBack = 0, directMem = 0;
   int is_linked = 0;
   int offset = 0;
@@ -556,9 +519,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
   state->acnt = 0;
   state->flow = noflow;
   ignoreFirstOpd = 0;
-
-  if (state->commentBuffer)
-    state->commentBuffer[0] = '\0';
 
   switch (state->_opcode)
     {
@@ -798,7 +758,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
 	  arc_sprintf (state, state->operandBuffer, formatString,
 		      fieldB, fieldC);
 	}
-      write_comments ();
       break;
 
     case CLASS_A4_OP3_GENERAL:
@@ -820,7 +779,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
 	  WRITE_FORMAT_x (B);
 	  arc_sprintf (state, state->operandBuffer, formatString, fieldB);
 	}
-      write_comments ();
       break;
 
     case CLASS_A4_FLAG:
@@ -831,7 +789,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       write_instr_name ();
       WRITE_FORMAT_x (B);
       arc_sprintf (state, state->operandBuffer, formatString, fieldB);
-      write_comments ();
       break;
 
     case CLASS_A4_BRANCH:
@@ -855,7 +812,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       strcat (formatString, "%s"); /* Address/label name.  */
       arc_sprintf (state, state->operandBuffer, formatString,
 		  post_address (state, fieldA));
-      write_comments ();
       break;
 
     case CLASS_A4_JC:
@@ -901,7 +857,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       else
 	arc_sprintf (state, state->operandBuffer, formatString,
 		    post_address (state, fieldB), fieldA);
-      write_comments ();
       break;
 
     case CLASS_A4_LD0:
@@ -938,7 +893,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       WRITE_FORMAT_x_RB (C);
       arc_sprintf (state, state->operandBuffer, formatString,
 		  fieldA, fieldB, fieldC);
-      write_comments ();
       break;
 
     case CLASS_A4_LD1:
@@ -948,7 +902,7 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       fieldC = FIELDD (state->words[0]);
 
       if (dbg)
-	printf_unfiltered ("6:b reg %d %d c 0x%x  \n",
+	eprintf ("6:b reg %d %d c 0x%x  \n",
 			   fieldBisReg, fieldB, fieldC);
       state->_ea_present = 1;
       state->_offset = fieldC;
@@ -984,7 +938,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
 	}
       arc_sprintf (state, state->operandBuffer, formatString,
 		  fieldA, fieldB, fieldC);
-      write_comments ();
       break;
 
     case CLASS_A4_ST:
@@ -994,7 +947,7 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       fieldA = FIELDD(state->words[0]); /* shimm */
 
       /* [B,A offset] */
-      if (dbg) printf_unfiltered("7:b reg %d %x off %x\n",
+      if (dbg) eprintf("7:b reg %d %x off %x\n",
 				 fieldBisReg,fieldB,fieldA);
       state->_ea_present = 1;
       state->_offset = fieldA;
@@ -1030,7 +983,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
 	}
       arc_sprintf (state, state->operandBuffer, formatString,
 		  fieldC, fieldB, fieldA);
-      write_comments2 (fieldA);
       break;
 
     case CLASS_A4_SR:
@@ -1045,7 +997,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       WRITE_FORMAT_x (B);
       WRITE_FORMAT_RB ();
       arc_sprintf (state, state->operandBuffer, formatString, fieldC, fieldB);
-      write_comments ();
       break;
 
     case CLASS_A4_OP3_SUBOPC3F:
@@ -1065,7 +1016,6 @@ dsmOneArcInst (bfd_vma addr, struct arcDisState * state)
       WRITE_FORMAT_x (B);
       WRITE_FORMAT_RB ();
       arc_sprintf (state, state->operandBuffer, formatString, fieldA, fieldB);
-      write_comments ();
       break;
 
     default:
@@ -1128,7 +1078,6 @@ ARCTangent_decodeInstr (bfd_vma address, disassemble_info *info)
   struct arcDisState s;		/* ARC Disassembler state.  */
   void *stream = info->stream; 	/* Output stream.  */
   fprintf_ftype func = info->fprintf_func;
-  int bytes;
 
   memset (&s, 0, sizeof(struct arcDisState));
 
@@ -1158,7 +1107,7 @@ ARCTangent_decodeInstr (bfd_vma address, disassemble_info *info)
   s.instName = _instName;
 
   /* Disassemble.  */
-  bytes = dsmOneArcInst (address, (void *)& s);
+  dsmOneArcInst (address, (void *)&s);
 
   /* Display the disassembly instruction.  */
 /*

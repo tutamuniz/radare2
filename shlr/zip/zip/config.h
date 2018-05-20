@@ -5,8 +5,12 @@
    */
 /* #undef HAVE_DECL_TZNAME */
 
+#ifndef ftello
 #define ftello ftell
+#endif
+#ifndef fseeko
 #define fseeko fseek
+#endif
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #define HAVE_DLFCN_H 1
@@ -54,7 +58,9 @@
 #define HAVE_SNPRINTF 1
 
 /* Define to 1 if the system has the type `ssize_t'. */
+#ifndef _MSC_VER
 #define HAVE_SSIZE_T 1
+#endif
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
@@ -69,7 +75,9 @@
 #define HAVE_STRDUP 1
 
 /* Define to 1 if you have the <strings.h> header file. */
+#ifndef _MSC_VER
 #define HAVE_STRINGS_H 1
+#endif
 
 /* Define to 1 if you have the <string.h> header file. */
 #define HAVE_STRING_H 1
@@ -106,7 +114,11 @@
 #define HAVE_UINT8_T 1
 
 /* Define to 1 if you have the <unistd.h> header file. */
+#ifdef _MSC_VER
+#define HAVE_UNISTD_H 0
+#else
 #define HAVE_UNISTD_H 1
+#endif
 
 /* Define to 1 if you have the `_close' function. */
 /* #undef HAVE__CLOSE */

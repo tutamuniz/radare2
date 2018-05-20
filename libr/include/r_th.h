@@ -1,18 +1,15 @@
-#ifndef _INCLUDE_R_TH_H_
-#define _INCLUDE_R_TH_H_
+#ifndef R2_TH_H
+#define R2_TH_H
 
 #include "r_types.h"
 
 #define HAVE_PTHREAD 1
 
 #if __WINDOWS__
-
-#include <windows.h>
-
 #undef HAVE_PTHREAD
 #define HAVE_PTHREAD 0
 #define R_TH_TID HANDLE
-#define R_TH_LOCK_T PCRITICAL_SECTION
+#define R_TH_LOCK_T CRITICAL_SECTION
 //HANDLE
 
 #elif HAVE_PTHREAD
@@ -22,7 +19,7 @@
 #define R_TH_LOCK_T pthread_mutex_t
 
 #else
-#error Threading library only supported for ptrace and w32
+#error Threading library only supported for pthread and w32
 #endif
 
 #define R_TH_FUNCTION(x) int (*x)(struct r_th_t *)
@@ -38,6 +35,10 @@ typedef struct r_th_lock_t {
 
 typedef struct r_th_t {
 	R_TH_TID tid;
+#if HAVE_PTHREAD
+	pthread_mutex_t _mutex;
+	pthread_cond_t _cond;
+#endif
 	RThreadLock *lock;
 	R_TH_FUNCTION(fun);
 	void *user;    // user pointer
@@ -54,19 +55,33 @@ typedef struct r_th_pool_t {
 
 #ifdef R_API
 R_API RThread *r_th_new(R_TH_FUNCTION(fun), void *user, int delay);
-R_API int r_th_start(RThread *th, int enable);
+R_API bool r_th_start(RThread *th, int enable);
 R_API int r_th_wait(RThread *th);
 R_API int r_th_wait_async(RThread *th);
 R_API void r_th_break(RThread *th);
-R_API int r_th_wait(RThread *th);
 R_API void *r_th_free(RThread *th);
+R_API bool r_th_kill(RThread *th, bool force);
+R_API bool r_th_pause(RThread *th, bool enable);
+R_API bool r_th_try_pause(RThread *th);
+R_API R_TH_TID r_th_self();
 
-R_API RThreadLock *r_th_lock_new();
+R_API RThreadLock *r_th_lock_new(bool recursive);
 R_API int r_th_lock_wait(RThreadLock *th);
 R_API int r_th_lock_check(RThreadLock *thl);
 R_API int r_th_lock_enter(RThreadLock *thl);
 R_API int r_th_lock_leave(RThreadLock *thl);
 R_API void *r_th_lock_free(RThreadLock *thl);
+
+typedef struct r_thread_msg_t {
+	char *text;
+	char done;
+	char *res;
+	RThread *th;
+} RThreadMsg;
+
+R_API RThreadMsg* r_th_msg_new (const char *cmd, void *cb);
+R_API void r_th_msg_free (RThreadMsg* msg);
+
 #endif
 
 #ifdef __cplusplus

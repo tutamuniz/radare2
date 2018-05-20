@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2013 - pancake */
+/* radare2 - LGPL - Copyright 2013-2018 - pancake, astuder */
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -7,31 +7,35 @@
 #include <r_util.h>
 #include <r_lib.h>
 #include <r_asm.h>
-#include "../arch/8051/8051.c"
+
+#include <8051_disas.h>
 
 static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
-	Op8051 o = do8051struct (buf, len);
-	*op->buf_asm = 0;
-	if (!o.name) return 0; // invalid instruction
-	do8051disasm (o, a->pc, op->buf_asm, sizeof (op->buf_asm));
-	return (op->size = o.length);
+	int dlen = _8051_disas (a->pc, op, buf, len);
+	if (dlen < 0) {
+		dlen = 0;
+	}
+	op->size = dlen;
+	return dlen;
 }
 
 RAsmPlugin r_asm_plugin_8051 = {
 	.name = "8051",
 	.arch = "8051",
-	.bits = 16,
-	.desc = "8051 assembler/disassembler",
-	.init = NULL,
-	.fini = NULL,
+	.bits = 8,
+	.endian = R_SYS_ENDIAN_NONE,
+	.desc = "8051 Intel CPU",
 	.disassemble = &disassemble,
-	.assemble = NULL,
-	.license = "PD"
+	.license = "PD",
+	.cpus =
+		"8051-generic," // First one is default
+		"8051-shared-code-xdata"
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_8051
+	.data = &r_asm_plugin_8051,
+	.version = R2_VERSION
 };
 #endif

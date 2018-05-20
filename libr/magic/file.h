@@ -34,9 +34,7 @@
 #ifndef __file_h__
 #define __file_h__
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include "mconfig.h"
 #include <r_magic.h>
 
 #include <stdio.h>	/* Include that here, to make sure __P gets defined */
@@ -48,6 +46,9 @@
 /* Do this here and now, because struct stat gets re-defined on solaris */
 #include <sys/stat.h>
 #include <stdarg.h>
+#ifdef _MSC_VER
+typedef unsigned int ssize_t;
+#endif
 
 /* Type for Unicode characters */
 typedef unsigned long unichar;
@@ -85,8 +86,10 @@ ssize_t sread(int, void *, size_t, int);
 int file_check_mem(struct r_magic_set *, unsigned int);
 int file_looks_utf8(const unsigned char *, size_t, unichar *, size_t *);
 
-extern const char *file_names[];
+/*
+extern const char *magic_file_names[FILE_NAMES_SIZE];
 extern const size_t file_nnames;
+*/
 
 #ifndef HAVE_VASPRINTF
 int vasprintf(char **ptr, const char *format_string, va_list vargs);

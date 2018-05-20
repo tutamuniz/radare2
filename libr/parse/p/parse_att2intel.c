@@ -6,7 +6,7 @@
 
 #include <r_lib.h>
 #include <r_util.h>
-#include <r_flags.h>
+#include <r_flag.h>
 #include <r_anal.h>
 #include <r_parse.h>
 
@@ -49,7 +49,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 				}
 				newstr[k]='\0';
 			}
-			return R_TRUE;
+			return true;
 		}
 	}
 
@@ -62,11 +62,11 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		}
 	}
 
-	return R_FALSE;
+	return false;
 }
 
 static int parse(RParse *p, const char *data, char *str) {
-	int i, n, len = strlen (data);
+	int i, n;
 	char w0[32];
 	char w1[32];
 	char w2[32];
@@ -74,22 +74,19 @@ static int parse(RParse *p, const char *data, char *str) {
 	char *buf, *ptr, *optr, *num;
 
 	// malloc can be slow here :?
-	if ((buf = malloc (len+1)) == NULL)
-		return R_FALSE;
-	{/* strip whitechars from the beggining */	
-	char *o = (char *)r_str_trim_head (data);
-	memcpy (buf, o, strlen (o)+1);
-	}
+	buf = strdup (data);
+	if (!buf) return false;
+	r_str_trim_head (buf);
 
 	ptr = strchr (buf, '#');
 	if (ptr) {
 		*ptr = 0;
-		r_str_chop (buf);
+		r_str_trim (buf);
 	}
 	if (*buf == '.' || buf[strlen(buf)-1] == ':') {
 		free (buf);
 		strcpy (str, data);
-		return R_TRUE;
+		return true;
 	}
 	r_str_replace_char (buf, '$', 0);
 	r_str_replace_char (buf, '%', 0);
@@ -119,27 +116,27 @@ static int parse(RParse *p, const char *data, char *str) {
 	if (*buf) {
 		*w0 = *w1 = *w2 = *w3 = 0;
 		ptr = strchr (buf, ' ');
-		if (ptr == NULL)
+		if (!ptr)
 			ptr = strchr (buf, '\t');
 		if (ptr) {
 			*ptr = '\0';
 			for (++ptr; *ptr==' '; ptr++);
-			strcpy (w0, buf);
-			strcpy (w1, ptr);
+			strncpy (w0, buf, sizeof(w0) - 1);
+			strncpy (w1, ptr, sizeof(w1) - 1);
 
 			optr = ptr;
 			ptr = strchr (ptr, ',');
 			if (ptr) {
 				*ptr = '\0';
 				for (++ptr; *ptr==' '; ptr++);
-				strcpy (w1, optr);
-				strcpy (w2, ptr);
+				strncpy (w1, optr, sizeof(w1)-1);
+				strncpy (w2, ptr, sizeof(w2)-1);
 				ptr = strchr (ptr, ',');
 				if (ptr) {
 					*ptr = '\0';
 					for (++ptr; *ptr==' '; ptr++);
-					strcpy (w2, optr);
-					strcpy (w3, ptr);
+					strncpy (w2, optr, sizeof(w2)-1);
+					strncpy (w3, ptr, sizeof(w3)-1);
 				}
 			}
 		}
@@ -154,48 +151,21 @@ static int parse(RParse *p, const char *data, char *str) {
 		}
 	}
 	free (buf);
-	return R_TRUE;
+	return true;
 }
 
-static int assemble(RParse *p, char *data, char *str) {
-	char *ptr;
-	printf ("---> assembling '%s' to generate real asm code\n", str);
-	ptr = strchr (str, '=');
-	if (ptr) {
-		*ptr = '\0';
-		sprintf (data, "mov %s, %s", str, ptr+1);
-	} else strcpy (data, str);
-	return R_TRUE;
-}
-
-static int varsub(RParse *p, RAnalFunction *f, char *data, char *str, int len) {
-	char *ptr, *ptr2;
-	int i;
-
-	strncpy (str, data, len);
-	for (i = 0; i < R_ANAL_VARSUBS; i++)
-		if (f->varsubs[i].pat[0] != '\0' && f->varsubs[i].sub[0] != '\0' &&
-			(ptr = strstr (data, f->varsubs[i].pat))) {
-				*ptr = '\0';
-				ptr2 = ptr + strlen (f->varsubs[i].pat);
-				snprintf (str, len, "%s%s%s", data, f->varsubs[i].sub, ptr2);
-		}
-	return R_TRUE;
-}
-
-struct r_parse_plugin_t r_parse_plugin_att2intel = {
+RParsePlugin r_parse_plugin_att2intel = {
 	.name = "att2intel",
 	.desc = "X86 att 2 intel plugin",
 	.init = NULL,
 	.fini = NULL,
 	.parse = &parse,
-	.assemble = &assemble,
-	.varsub = &varsub,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
-	.data = &r_parse_plugin_att2intel
+	.data = &r_parse_plugin_att2intel,
+	.version = R2_VERSION
 };
 #endif

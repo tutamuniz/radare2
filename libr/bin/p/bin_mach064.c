@@ -1,17 +1,24 @@
-/* radare - LGPL - Copyright 2009-2013 - nibble, pancake */
+/* radare - LGPL - Copyright 2009-2015 - nibble, pancake, alvaro_fe */
 
 #define R_BIN_MACH064 1
 #include "bin_mach0.c"
 
-static int check(RBinFile *arch) {
-	if (arch && arch->buf && arch->buf->buf)
-	if (!memcmp (arch->buf->buf, "\xfe\xed\xfa\xcf", 4) ||
-		!memcmp (arch->buf->buf, "\xcf\xfa\xed\xfe", 4))
-		return R_TRUE;
-	return R_FALSE;
+#include "objc/mach064_classes.h"
+
+static bool check_bytes(const ut8 *buf, ut64 length) {
+	if (buf && length > 4)
+		if (!memcmp (buf, "\xfe\xed\xfa\xcf", 4) ||
+			!memcmp (buf, "\xcf\xfa\xed\xfe", 4))
+			return true;
+	return false;
 }
 
 static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data, int datalen) {
+	const bool use_pagezero = true;
+	const bool use_main = true;
+	const bool use_dylinker = true;
+	const bool use_libsystem = true;
+	const bool use_linkedit = true;
 	ut64 filesize, codeva, datava;
 	ut32 ncmds, magiclen, headerlen;
 	ut64 p_codefsz=0, p_codeva=0, p_codesz=0, p_codepa=0;
@@ -33,11 +40,23 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 	B ("\xcf\xfa\xed\xfe", 4); // header
 	D (7 | 0x01000000); // cpu type (x86) | ABI64
 	//D (3); // subtype (i386-all)
-	D(0x80000003); // unknown subtype issue
+	D(0x80000003); // x86-64 subtype
 	D (2); // filetype (executable)
 
 	ncmds = (data && datalen>0)? 3: 2;
-	
+	if (use_pagezero) {
+		ncmds++;
+	}
+	if (use_dylinker) {
+		ncmds++;
+		if (use_linkedit) {
+			ncmds += 3;
+		}
+		if (use_libsystem) {
+			ncmds++;
+		}
+	}
+
 	/* COMMANDS */
 	D (ncmds); // ncmds
 	p_cmdsize = buf->length;
@@ -46,6 +65,21 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 	D (0); // reserved -- only found in x86-64
 
 	magiclen = buf->length;
+
+	if (use_pagezero) {
+		/* PAGEZERO */
+		D (0x19);   // cmd.LC_SEGMENT
+		D (72); // sizeof (cmd)
+		WZ (16, "__PAGEZERO");
+		Q (0); // vmaddr
+		Q (0x1000); // vmsize XXX
+		Q (0); // fileoff
+		Q (0); // filesize
+		D (0); // maxprot
+		D (0); // initprot
+		D (0); // nsects
+		D (0); // flags
+	}
 
 	/* TEXT SEGMENT */
 	D (0x19);   // cmd.LC_SEGMENT_64
@@ -116,27 +150,90 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 		D (0); // reserved3
 	}
 
-#define STATESIZE (21*sizeof (ut64))
-	/* THREAD STATE */
-	D (5); // LC_UNIXTHREAD
-	D (184); // sizeof (cmd)
-	
-	D (4); // 1=i386, 4=x86_64
-	D (42); // thread-state-count
-	p_entry = buf->length + (16*sizeof (ut64));
-	Z (STATESIZE);
+	if (use_dylinker) {
+		if (use_linkedit) {
+			/* LINKEDIT */
+			D (0x19);   // cmd.LC_SEGMENT
+			D (72); // sizeof (cmd)
+			WZ (16, "__LINKEDIT");
+			Q (0x3000); // vmaddr
+			Q (0x00001000); // vmsize XXX
+			Q (0x1000); // fileoff
+			Q (0); // filesize
+			D (7); // maxprot
+			D (3); // initprot
+			D (0); // nsects
+			D (0); // flags
 
+			/* LC_SYMTAB */
+			D (2); // cmd.LC_SYMTAB
+			D (24); // sizeof (cmd)
+			D (0x1000); // symtab offset
+			D (0); // symtab size
+			D (0x1000); // strtab offset
+			D (0); // strtab size
+
+			/* LC_DYSYMTAB */
+			D (0xb); // cmd.LC_DYSYMTAB
+			D (80); // sizeof (cmd)
+			Z (18 * sizeof (ut32)); // empty
+		}
+
+		const char *dyld = "/usr/lib/dyld";
+		const int dyld_len = strlen (dyld) + 1;
+		D(0xe); /* LC_DYLINKER */
+		D((4 * 3) + dyld_len);
+		D(dyld_len - 2);
+		WZ(dyld_len, dyld); // path
+
+		if (use_libsystem) {
+			/* add libSystem at least ... */
+			const char *lib = "/usr/lib/libSystem.B.dylib";
+			const int lib_len = strlen (lib) + 1;
+			D (0xc); /* LC_LOAD_DYLIB */
+			D (24 + lib_len); // cmdsize
+			D (24); // offset where the lib string start
+			D (0x2);
+			D (0x1);
+			D (0x1);
+			WZ (lib_len, lib);
+		}
+	}
+	if (use_main) {
+		/* LC_MAIN */
+		D (0x80000028);   // cmd.LC_MAIN
+		D (24); // sizeof (cmd)
+		D (baddr); // entryoff
+		D (0); // stacksize
+		D (0); // ???
+		D (0); // ???
+	} else {
+#define STATESIZE (21*sizeof (ut64))
+		/* THREAD STATE */
+		D (5); // LC_UNIXTHREAD
+		D (184); // sizeof (cmd)
+		D (4); // 1=i386, 4=x86_64
+		D (42); // thread-state-count
+		p_entry = buf->length + (16*sizeof (ut64));
+		Z (STATESIZE);
+	}
+
+	WZ (4096 - buf->length, "");
 	headerlen = buf->length - magiclen;
 
 	codeva = buf->length + baddr;
 	datava = buf->length + codelen + baddr;
-	W (p_entry, &codeva, 8); // set PC
+
+	if (p_entry != 0) {
+		W (p_entry, &codeva, 8); // set PC
+	}
 
 	/* fill header variables */
 	W (p_cmdsize, &headerlen, 4);
 	filesize = magiclen + headerlen + codelen + datalen;
 	// TEXT SEGMENT //
 	W (p_codefsz, &filesize, 8);
+	W (p_codefsz-16, &filesize, 8); // vmsize = filesize
 	W (p_codeva, &codeva, 8);
 	{
 		ut64 clen = codelen;
@@ -160,16 +257,15 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 	return buf;
 }
 
-static RBinAddr* binsym(RBinFile *arch, int sym) {
+static RBinAddr* binsym(RBinFile *bf, int sym) {
 	ut64 addr;
 	RBinAddr *ret = NULL;
 	switch (sym) {
 	case R_BIN_SYM_MAIN:
-		addr = MACH0_(r_bin_mach0_get_main) (arch->o->bin_obj);
-		if (!addr || !(ret = R_NEW (RBinAddr)))
+		addr = MACH0_(get_main) (bf->o->bin_obj);
+		if (!addr || !(ret = R_NEW0 (RBinAddr)))
 			return NULL;
-		memset (ret, '\0', sizeof (RBinAddr));
-		ret->offset = ret->rva = addr;
+		ret->paddr = ret->vaddr = addr;
 		break;
 	}
 	return ret;
@@ -179,31 +275,33 @@ RBinPlugin r_bin_plugin_mach064 = {
 	.name = "mach064",
 	.desc = "mach064 bin plugin",
 	.license = "LGPL3",
-	.init = NULL,
-	.fini = NULL,
+	.get_sdb = &get_sdb,
 	.load = &load,
+	.load_bytes = &load_bytes,
+	.load_buffer = &load_buffer,
 	.destroy = &destroy,
-	.check = &check,
+	.check_bytes = &check_bytes,
 	.baddr = &baddr,
-	.boffset = NULL,
 	.binsym = binsym,
 	.entries = &entries,
 	.sections = &sections,
+	.signature = &entitlements,
 	.symbols = &symbols,
 	.imports = &imports,
-	.strings = NULL,
 	.info = &info,
-	.fields = NULL,
 	.libs = &libs,
+	.header = &MACH0_(mach_headerfields),
 	.relocs = &relocs,
-	.meta = NULL,
-	.write = NULL,
+	.fields = &MACH0_(mach_fields),
 	.create = &create,
+	.classes = &MACH0_(parse_classes),
+	.write = &r_bin_write_mach0,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
-	.data = &r_bin_plugin_mach064
+	.data = &r_bin_plugin_mach064,
+	.version = R2_VERSION
 };
 #endif

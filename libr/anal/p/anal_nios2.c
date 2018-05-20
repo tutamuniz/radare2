@@ -7,8 +7,7 @@
 #include <r_anal.h>
 
 static int nios2_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *b, int len) {
-	ut64 dst = 0LL;
-	if (op == NULL)
+	if (!op)
 		return 1;
 	/* Ayeeee! What's inside op? Do we have an initialized RAnalOp? Are we going to have a leak here? :-( */
 	memset (op, 0, sizeof (RAnalOp)); /* We need to refactorize this. Something like r_anal_op_init would be more appropiate */
@@ -89,26 +88,20 @@ static int nios2_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *b, int len) 
 	return op->size;
 }
 
-struct r_anal_plugin_t r_anal_plugin_nios2 = {
+RAnalPlugin r_anal_plugin_nios2 = {
 	.name = "nios2",
-	.desc = "brainfuck code analysis plugin",
+	.desc = "NIOS II code analysis plugin",
 	.license = "LGPL3",
-	.arch = R_SYS_ARCH_BF,
+	.arch = "nios2",
+	.esil = false,
 	.bits = 32,
-	.init = NULL,
-	.fini = NULL,
 	.op = &nios2_op,
-	.set_reg_profile = NULL,
-	.fingerprint_bb = NULL,
-	.fingerprint_fcn = NULL,
-	.diff_bb = NULL,
-	.diff_fcn = NULL,
-	.diff_eval = NULL
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ANAL,
-	.data = &r_anal_plugin_nios2
+	.data = &r_anal_plugin_nios2,
+	.version = R2_VERSION
 };
 #endif

@@ -5,6 +5,13 @@
 # update: 2010-01-14
 #
 
+LANG=C
+LC_ALL=C
+LOADLIBS=1
+
+export LANG
+export LC_ALL
+
 list () {
   for a in $STATIC ; do echo "static  $a" ; done
   for a in $SHARED ; do echo "shared  $a" ; done
@@ -15,6 +22,7 @@ help () {
   echo "Usage: ./configure-plugins [options]"
   echo "  -n                   do nothing.. do not generate any file"
   echo "  --list               list all static and shared plugins"
+  echo "  --rm-static [dir]    remove plugins that are already in core from dir"
   echo "  --static [name ..]   define named plugin as static"
   echo "  --shared [name ..]   define named plugin as shared"
   echo "  --help, -h           display this helpful message"
@@ -24,19 +32,24 @@ help () {
 
 cfg=./plugins.cfg
 
+if [ ! -f "$cfg" ]; then
+  cp -f ./plugins.def.cfg plugins.cfg
+fi
+
 load () {
   if [ -e $cfg ]; then 
     echo "configure-plugins: Loading $cfg .."
     . $cfg
   else
-    echo "configure-plugins: Loading plugins.def.cfg .."
-    . ./plugins.def.cfg
+    echo "configure-plugins: Loading $1 .."
+    . "$1" #plugins.def.cfg
   fi
 }
 
 save () {
-  echo "STATIC=\"$STATIC\"" > $cfg
-  echo "SHARED=\"$SHARED\"" >>$cfg
+  cp $cfg plugins.cfg
+ # echo "STATIC=\"$STATIC\"" > $cfg
+ # echo "SHARED=\"$SHARED\"" >>$cfg
 }
 
 generate_configh () {
@@ -48,7 +61,11 @@ generate_configh () {
     if [ ! "$oldlib" = "$lib" ]; then
       [ -n "$oldlib" ] && echo "     0"
       oldlib=$lib
-      uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      if type perl > /dev/null 2>&1 ; then
+        uclib=$(echo $lib | perl -pe 'tr/[a-z]/[A-Z]/')
+      else
+        uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      fi
       echo
       echo "#define R_${uclib}_STATIC_PLUGINS \\"
       plugins="${plugins} __${uclib}"
@@ -63,7 +80,11 @@ generate_configh () {
     plg=$(echo $a | cut -d . -f 2) # plugin name
     if [ ! "$oldlib" = "$lib" ]; then
       oldlib=$lib
-      uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      if type perl > /dev/null 2>&1; then
+        uclib=$(echo $lib | perl -pe 'tr/[a-z]/[A-Z]/')
+      else
+        uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      fi
       if [ -z "`echo ${plugins} | grep __${uclib}`" ]; then
         plugins="${plugins} __${uclib}"
         echo
@@ -82,7 +103,11 @@ generate_configmk () {
     if [ ! "$oldlib" = "$lib" ]; then
       [ -n "$oldlib" ] && printf "\n"
       oldlib=$lib
-      uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      if type perl > /dev/null 2>&1 ; then
+        uclib=$(echo $lib | perl -pe 'tr/[a-z]/[A-Z]/')
+      else
+        uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+      fi
       printf "STATIC_${uclib}_PLUGINS= "
       plugins="${plugins} __${uclib}"
     fi
@@ -94,7 +119,11 @@ generate_configmk () {
   # fill the holes with love
   for a in ${SHARED} ; do
     lib=$(echo $a | cut -d . -f 1) # library
-    uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+    if type perl > /dev/null 2>&1 ; then
+      uclib=$(echo $lib | perl -pe 'tr/[a-z]/[A-Z]/')
+    else
+      uclib=$(echo $lib | tr '[a-z]' '[A-Z]')
+    fi
     if [ -z "`echo ${plugins} | grep __${uclib}`" ]; then
       plugins="${plugins} __${uclib}"
       echo "STATIC_${uclib}_PLUGINS="
@@ -105,6 +134,7 @@ generate_configmk () {
 generate () {
   echo "configure-plugins: Generating libr/config.h .."
   cat libr/config.h.head > libr/config.h
+  echo "#define R2_LOADLIBS ${LOADLIBS}" >> libr/config.h
   generate_configh >> libr/config.h
   cat libr/config.h.tail >> libr/config.h
 
@@ -123,8 +153,16 @@ sub () {
   n="" ; for a in $1 ; do [ $a = $2 ] && continue ; n="$n $a" ; done ; echo $n
 }
 
+
+echo | sort -t. > /dev/null 2>&1
+if [ $? = 0 ]; then
+  SORT="sort -t."
+else
+  SORT="sort"
+fi
+
 dosort () {
-  ( for a in $1 ; do echo $a ; done ) | sort -t.
+  ( for a in $1 ; do echo $a ; done ) | tr _ Z | ${SORT} | tr Z _
   #( for a in $1 ; do echo $a ; done ) | sort -t. --key=1,1d
 }
 
@@ -145,15 +183,42 @@ make_shared () {
 
 make_ () { : ; }
 
-load
 
 MODE=""
 DONOTHING=0
+DEFCFG=./plugins.def.cfg
+
+rmstatic() {
+  C=0
+  if [ -z "$1" ]; then
+    echo "Missing argument"
+    exit 1
+  fi
+  for a in ${STATIC} ; do
+    b="`echo $a | tr . _`"
+    for ext in dll dylib so ; do
+      f="$b.$ext"
+      if [ -f "$f" ]; then
+        C=$(($C+1))
+	printf "  $C found\r"
+        #echo "rm -f $f"
+        rm -f "$f"
+      fi
+    done
+  done
+  echo "Removed $C shared plugins that are already static"
+}
+
+RMSTATIC=-
+
 while : ; do
   [ -z "$1" ] && break
   case "$1" in
   "--static") MODE=static ; ;;
   "--shared") MODE=shared ; ;;
+  "--without-gpl") DEFCFG=./plugins.nogpl.cfg ;;
+  "--disable-loadlibs") LOADLIBS=0 ;;
+  "--rm-static") RMSTATIC="$2" ; ;;
   "--list") sort_vars ; list ; ;;
   "-n") DONOTHING=1 ; ;;
   "-h"|"--help") help ; ;;
@@ -162,9 +227,24 @@ while : ; do
   shift
 done
 
+load ${DEFCFG}
 sort_vars
 
+if [ - != "${RMSTATIC}" ]; then
+  if [ -z "${RMSTATIC}" ]; then
+    echo "Missing argument" >&2
+    exit
+  fi
+  if [ -d "${RMSTATIC}" ]; then
+    cd "${RMSTATIC}" && rmstatic "${RMSTATIC}"
+  fi
+  exit 0
+fi
+
 [ ${DONOTHING} = 0 ] && generate
+
+echo SHARED: ${SHARED}
+echo STATIC: ${STATIC}
 
 save
 

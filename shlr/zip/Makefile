@@ -1,26 +1,34 @@
+NAME=rz
+LIBAR=librz.$(EXT_AR)
+
 include ../../config-user.mk
 include ../../libr/config.mk
+include ../../mk/platform.mk
 include ../../mk/${COMPILER}.mk
 
 ifeq ($(USE_LIB_ZIP),1)
 all:
-	rm -f librz.a
+	rm -f librz.$(EXT_AR)
 else
 
-all: librz.a
 
-LIBAR=librz.a
-librz.a: zip/libr_zip.a
-	${CC_AR} librz.a zlib/*.o zip/*.o
+LIBAR=librz.$(EXT_AR)
+RANLIB?=ranlib
 
-zip/libr_zip.a: zlib/libr_z.a
-	${MAKE} -C zip
+all: $(LIBAR)
 
-zlib/libr_z.a:
-	${MAKE} -C zlib
+$(LIBAR): zip/libr_zip.$(EXT_AR)
+	${CC_AR} zlib/*.o zip/*.o
+	$(RANLIB) librz.$(EXT_AR)
+
+zip/libr_zip.$(EXT_AR): zlib/libr_z.$(EXT_AR)
+	$(MAKE) -C zip
+
+zlib/libr_z.$(EXT_AR):
+	$(MAKE) -C zlib
 
 clean:
-	${MAKE} -C zlib clean
-	${MAKE} -C zip clean
-	rm -f *.a *.${EXT_SO}
+	$(MAKE) -C zlib clean
+	$(MAKE) -C zip clean
+	rm -f *.$(EXT_AR) *.${EXT_SO} zlib/*.$(EXT_AR) zip/*.$(EXT_AR)
 endif

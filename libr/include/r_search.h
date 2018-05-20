@@ -1,5 +1,5 @@
-#ifndef _INCLUDE_R_SEARCH_H_
-#define _INCLUDE_R_SEARCH_H_
+#ifndef R2_SEARCH_H
+#define R2_SEARCH_H
 
 #include <r_types.h>
 #include <r_util.h>
@@ -20,6 +20,7 @@ enum {
 	R_SEARCH_XREFS,
 	R_SEARCH_AES,
 	R_SEARCH_DELTAKEY,
+	R_SEARCH_MAGIC,
 	R_SEARCH_LAST
 };
 
@@ -29,19 +30,16 @@ enum {
 #define R_SEARCH_KEYWORD_TYPE_STRING 's'
 
 typedef struct r_search_keyword_t {
-	char keyword[128];
-	char binmask[128];
-	ut8 bin_keyword[128];
-	ut8 bin_binmask[128];
+	ut8 *bin_keyword;
+	ut8 *bin_binmask;
 	ut32 keyword_length;
 	ut32 binmask_length;
-	ut32 idx[R_SEARCH_DISTANCE_MAX]; // searching purposes
-	int distance;
 	void *data;
 	int count;
 	int kwidx;
 	int icase; // ignore case
 	int type;
+	ut64 last; // last hit hint
 } RSearchKeyword;
 
 typedef struct r_search_hit_t {
@@ -49,26 +47,30 @@ typedef struct r_search_hit_t {
 	ut64 addr;
 } RSearchHit;
 
-typedef int (*RSearchUpdate)(void *s, ut64 from, const ut8 *buf, int len);
 typedef int (*RSearchCallback)(RSearchKeyword *kw, void *user, ut64 where);
 
 typedef struct r_search_t {
-	int n_kws;
+	int n_kws; // hit${n_kws}_${count}
 	int mode;
 	ut32 pattern_size;
-	ut32 string_min; /* min number of matches */
-	ut32 string_max; /* max number of matches */
-	void *user; /* user data */
+	ut32 string_min; // max length of strings for R_SEARCH_STRING
+	ut32 string_max; // min length of strings for R_SEARCH_STRING
+	void *data; // data used by search algorithm
+	void *user; // user data passed to callback
 	RSearchCallback callback;
+	ut64 nhits;
+	ut64 maxhits; // search.maxhits
 	RList *hits;
-	int nhits;
 	RMemoryPool *pool;
 	int distance;
 	int inverse;
+	bool overlap; // whether two matches can overlap
+	int contiguous;
 	int align;
-	RSearchUpdate update;
+	int (*update)(struct r_search_t *s, ut64 from, const ut8 *buf, int len);
 	RList *kws; // TODO: Use r_search_kw_new ()
 	RIOBind iob;
+	char bckwrds;
 } RSearch;
 
 #ifdef R_API
@@ -81,16 +83,21 @@ R_API RSearch *r_search_free(RSearch *s);
 
 /* keyword management */
 R_API RList *r_search_find(RSearch *s, ut64 addr, const ut8 *buf, int len);
-R_API int r_search_update(RSearch *s, ut64 *from, const ut8 *buf, long len);
+R_API int r_search_update(RSearch *s, ut64 from, const ut8 *buf, long len);
 R_API int r_search_update_i(RSearch *s, ut64 from, const ut8 *buf, long len);
 
+R_API void r_search_keyword_free (RSearchKeyword *kw);
 R_API RSearchKeyword* r_search_keyword_new(const ut8 *kw, int kwlen, const ut8 *bm, int bmlen, const char *data);
 R_API RSearchKeyword* r_search_keyword_new_str(const char *kw, const char *bm, const char *data, int icase);
+R_API RSearchKeyword* r_search_keyword_new_wide(const char *kw, const char *bm, const char *data, int icase);
 R_API RSearchKeyword* r_search_keyword_new_hex(const char *kwstr, const char *bmstr, const char *data);
 R_API RSearchKeyword* r_search_keyword_new_hexmask(const char *kwstr, const char *data);
+R_API RSearchKeyword *r_search_keyword_new_regexp (const char *str, const char *data);
 
 R_API int r_search_kw_add(RSearch *s, RSearchKeyword *kw);
 R_API void r_search_reset(RSearch *s, int mode);
+R_API void r_search_kw_reset(RSearch *s);
+R_API void r_search_string_prepare_backward(RSearch *s);
 R_API void r_search_kw_reset(RSearch *s);
 
 R_API int r_search_range_add(RSearch *s, ut64 from, ut64 to);
@@ -98,13 +105,18 @@ R_API int r_search_range_set(RSearch *s, ut64 from, ut64 to);
 R_API int r_search_range_reset(RSearch *s);
 R_API int r_search_set_blocksize(RSearch *s, ut32 bsize);
 
+R_API int r_search_bmh(const RSearchKeyword *kw, const ut64 from, const ut8 *buf, const int len, ut64 *out);
+
 // TODO: is this an internal API?
-R_API int r_search_mybinparse_update(void *s, ut64 from, const ut8 *buf, int len);
-R_API int r_search_aes_update(void *s, ut64 from, const ut8 *buf, int len);
-R_API int r_search_deltakey_update(void *s, ut64 from, const ut8 *buf, int len);
-R_API int r_search_strings_update(void *s, ut64 from, const ut8 *buf, int len);
-R_API int r_search_regexp_update(void *s, ut64 from, const ut8 *buf, int len);
-R_API int r_search_xrefs_update(void *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_mybinparse_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_aes_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_rsa_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_magic_update(RSearch *_s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_deltakey_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_strings_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_regexp_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+R_API int r_search_xrefs_update(RSearch *s, ut64 from, const ut8 *buf, int len);
+// Returns 2 if search.maxhits is reached, 0 on error, otherwise 1
 R_API int r_search_hit_new(RSearch *s, RSearchKeyword *kw, ut64 addr);
 R_API void r_search_set_distance(RSearch *s, int dist);
 R_API int r_search_strings(RSearch *s, ut32 min, ut32 max);

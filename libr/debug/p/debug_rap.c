@@ -6,7 +6,7 @@
 
 static int r_debug_rap_step(RDebug *dbg) {
 	r_io_system (dbg->iob.io, "ds");
-	return R_TRUE;
+	return true;
 }
 
 static int r_debug_rap_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
@@ -15,74 +15,66 @@ static int r_debug_rap_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 }
 
 static int r_debug_rap_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
-	return R_FALSE; // XXX Error check	
+	return false; // XXX Error check
 }
 
 static int r_debug_rap_continue(RDebug *dbg, int pid, int tid, int sig) {
 	r_io_system (dbg->iob.io, "dc");
-	return R_TRUE;
+	return true;
 }
 
 static int r_debug_rap_wait(RDebug *dbg, int pid) {
 	/* do nothing */
-	return R_TRUE;
+	return true;
 }
 
 static int r_debug_rap_attach(RDebug *dbg, int pid) {
 // XXX TODO PID must be a socket here !!1
-	RIODesc *d = dbg->iob.io->fd;
+	RIODesc *d = dbg->iob.io->desc;
 	if (d && d->plugin && d->plugin->name) {
-		
 		if (!strcmp ("rap", d->plugin->name)) {
 			eprintf ("SUCCESS: rap attach with inferior rap rio worked\n");
 		} else {
-			eprintf ("ERROR: Underlaying IO descriptor is not a GDB one..\n");
+			eprintf ("ERROR: Underlaying IO descriptor is not a rap one..\n");
 		}
 	}
-	return R_TRUE;
+	return true;
 }
 
-static int r_debug_rap_detach(int pid) {
+static int r_debug_rap_detach(RDebug *dbg, int pid) {
 // XXX TODO PID must be a socket here !!1
 //	close (pid);
 	//XXX Maybe we should continue here?
-	return R_TRUE;
+	return true;
 }
 
 static char *r_debug_rap_reg_profile(RDebug *dbg) {
-	char *out, *tf = r_file_temp ("/tmp/rap.XXXXXX");
+	char *out, *tf = r_file_temp ("rap.XXXXXX");
 	int fd = r_cons_pipe_open (tf, 1, 0);
 	r_io_system (dbg->iob.io, "drp");
 	r_cons_pipe_close (fd);
 	out = r_file_slurp (tf, NULL);
 	r_file_rm (tf);
+	free (tf);
 	return out;
 }
 
-static int r_debug_rap_breakpoint (void *user, int type, ut64 addr, int hw, int rwx){
+static int r_debug_rap_breakpoint (RBreakpoint *bp, RBreakpointItem *b, bool set) {
 	//r_io_system (dbg->iob.io, "db");
-	return R_FALSE;
+	return false;
 }
 
 RDebugPlugin r_debug_plugin_rap = {
 	.name = "rap",
 	.license = "LGPL3",
-	/* TODO: Add support for more architectures here */
-	.arch = 0xff,
+	.arch = "any",
 	.bits = R_SYS_BITS_32,
-	.init = NULL,
 	.step = r_debug_rap_step,
 	.cont = r_debug_rap_continue,
 	.attach = &r_debug_rap_attach,
 	.detach = &r_debug_rap_detach,
 	.wait = &r_debug_rap_wait,
-	.pids = NULL,
-	.tids = NULL,
-	.threads = NULL,
-	.kill = NULL,
-	.frames = NULL,
-	.map_get = NULL,
-	.breakpoint = &r_debug_rap_breakpoint,
+	.breakpoint = (RBreakpointCallback)&r_debug_rap_breakpoint,
 	.reg_read = &r_debug_rap_reg_read,
 	.reg_write = &r_debug_rap_reg_write,
 	.reg_profile = (void *)r_debug_rap_reg_profile,
@@ -91,8 +83,9 @@ RDebugPlugin r_debug_plugin_rap = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_DBG,
-	.data = &r_debug_plugin_rap
+	.data = &r_debug_plugin_rap,
+	.version = R2_VERSION
 };
 #endif

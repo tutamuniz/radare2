@@ -1,3 +1,8 @@
+/* copyright 2015-2017 radare2 by pancake */
+
+#include <r_userconf.h>
+#include <r_util.h>
+
 #ifndef R2_GITTAP
 #define R2_GITTAP ""
 #endif
@@ -11,10 +16,12 @@
 #endif
 
 static int blob_version(const char *program) {
-	printf ("%s "R2_VERSION" @ "R_SYS_OS"-"R_SYS_ENDIAN"-"
+	printf ("%s "R2_VERSION" %d @ "
+			R_SYS_OS"-"
 			R_SYS_ARCH"-%d git.%s\n",
-			program, R_SYS_BITS&8?64:32,
-			*R2_GITTAP? R2_GITTAP: "");
+			program, R2_VERSION_COMMIT,
+			(R_SYS_BITS & 8)? 64: 32,
+			*R2_GITTAP ? R2_GITTAP: "");
 	if (*R2_GITTIP) {
 		printf ("commit: "R2_GITTIP" build: "R2_BIRTH"\n");
 	}

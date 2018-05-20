@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2013 - pancake */
+/* radare - LGPL - Copyright 2009-2016 - pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -16,10 +16,17 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 	}
 
 	ifd = r_file_mkstemp ("r_nasm", &ipath);
+	if (ifd == -1)
+		return -1;
+		
 	ofd = r_file_mkstemp ("r_nasm", &opath);
+	if (ofd == -1) {
+		free (ipath);
+		return -1;
+	}
 
 	len = snprintf (asm_buf, sizeof (asm_buf),
-			"BITS %i\nORG 0x%"PFMT64x"\n%s", a->bits, a->pc, buf);
+			"[BITS %i]\nORG 0x%"PFMT64x"\n%s\n", a->bits, a->pc, buf);
 	write (ifd, asm_buf, len);
 
 	close (ifd);
@@ -32,7 +39,6 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 	}
 
 	close (ofd);
-
 	unlink (ipath);
 	unlink (opath);
 	free (ipath);
@@ -44,20 +50,19 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 
 RAsmPlugin r_asm_plugin_x86_nasm = {
 	.name = "x86.nasm",
-	.desc = "X86 nasm assembler plugin",
+	.desc = "X86 nasm assembler",
 	.license = "LGPL3",
 	.arch = "x86",
 	// NOTE: 64bits is not supported on OSX's nasm :(
 	.bits = 16|32|64,
-	.init = NULL,
-	.fini = NULL,
-	.disassemble = NULL,
-	.assemble = &assemble, 
+	.endian = R_SYS_ENDIAN_LITTLE,
+	.assemble = &assemble
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_x86_nasm
+	.data = &r_asm_plugin_x86_nasm,
+	.version = R2_VERSION
 };
 #endif

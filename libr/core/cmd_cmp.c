@@ -1,52 +1,96 @@
-/* radare - LGPL - Copyright 2009-2014 - pancake */
+/* radare - LGPL - Copyright 2009-2018 - pancake */
 
-R_API void r_core_cmpwatch_free (RCoreCmpWatcher *w) {
+#include "r_core.h"
+
+static const char *help_msg_c[] = {
+	"Usage:", "c[?dfx] [argument]", " # Compare",
+	"c", " [string]", "Compare a plain with escaped chars string",
+	"c*", " [string]", "Compare a plain with escaped chars string (output r2 commands)",
+	"c4", " [value]", "Compare a doubleword from a math expression",
+	"c8", " [value]", "Compare a quadword from a math expression",
+	"cat", " [file]", "Show contents of file (see pwd, ls)",
+	"cc", " [at]", "Compares in two hexdump columns of block size",
+	"ccc", " [at]", "Same as above, but only showing different lines",
+	"ccd", " [at]", "Compares in two disasm columns of block size",
+	// "cc", " [offset]", "code bindiff current block against offset"
+	// "cD", " [file]", "like above, but using radiff -b",
+	"cf", " [file]", "Compare contents of file at current seek",
+	"cg", "[?] [o] [file]", "Graphdiff current file and [file]",
+	"cu", "[?] [addr] @at", "Compare memory hexdumps of $$ and dst in unified diff",
+	"cud", " [addr] @at", "Unified diff disasm from $$ and given address",
+	"cv", "[1248] [hexpairs] @at", "Compare 1,2,4,8-byte value (silent returns in $?",
+	"cV", "[1248] [addr] @at", "Compare 1,2,4,8-byte address contents (silent, return in $?)",
+	"cw", "[?] [us?] [...]", "Compare memory watchers",
+	"cx", " [hexpair]", "Compare hexpair string (use '.' as nibble wildcard)",
+	"cx*", " [hexpair]", "Compare hexpair string (output r2 commands)",
+	"cX", " [addr]", "Like 'cc' but using hexdiff output",
+	"", "", "",
+	"cd", " [dir]", "chdir",
+	"cl|cls|clear", "", "Clear screen, (clear0 to goto 0, 0 only)",
+	NULL
+};
+
+static void cmd_cmp_init(RCore *core) {
+	DEFINE_CMD_DESCRIPTOR (core, c);
+}
+
+R_API void r_core_cmpwatch_free(RCoreCmpWatcher *w) {
 	free (w->ndata);
 	free (w->odata);
 	free (w);
 }
 
-R_API RCoreCmpWatcher* r_core_cmpwatch_get(RCore *core, ut64 addr) {
+R_API RCoreCmpWatcher *r_core_cmpwatch_get(RCore *core, ut64 addr) {
 	RListIter *iter;
 	RCoreCmpWatcher *w;
 	r_list_foreach (core->watchers, iter, w) {
-		if (addr == w->addr)
+		if (addr == w->addr) {
 			return w;
+		}
 	}
 	return NULL;
 }
 
-R_API int r_core_cmpwatch_add (RCore *core, ut64 addr, int size, const char *cmd) {
+R_API int r_core_cmpwatch_add(RCore *core, ut64 addr, int size, const char *cmd) {
 	RCoreCmpWatcher *cmpw;
-	if (size<1) return R_FALSE;
+	if (size < 1) {
+		return false;
+	}
 	cmpw = r_core_cmpwatch_get (core, addr);
 	if (!cmpw) {
 		cmpw = R_NEW (RCoreCmpWatcher);
+		if (!cmpw) {
+			return false;
+		}
 		cmpw->addr = addr;
 	}
 	cmpw->size = size;
-	strncpy (cmpw->cmd, cmd, sizeof (cmpw->cmd));
+	snprintf (cmpw->cmd, sizeof (cmpw->cmd), "%s", cmd);
 	cmpw->odata = NULL;
 	cmpw->ndata = malloc (size);
+	if (!cmpw->ndata) {
+		free (cmpw);
+		return false;
+	}
 	r_io_read_at (core->io, addr, cmpw->ndata, size);
 	r_list_append (core->watchers, cmpw);
-	return R_TRUE;
+	return true;
 }
 
-R_API int r_core_cmpwatch_del (RCore *core, ut64 addr) {
-	int ret = R_FALSE;
+R_API int r_core_cmpwatch_del(RCore *core, ut64 addr) {
+	int ret = false;
 	RCoreCmpWatcher *w;
 	RListIter *iter, *iter2;
 	r_list_foreach_safe (core->watchers, iter, iter2, w) {
 		if (w->addr == addr || addr == UT64_MAX) {
 			r_list_delete (core->watchers, iter);
-			ret = R_TRUE;
+			ret = true;
 		}
 	}
 	return ret;
 }
 
-R_API int r_core_cmpwatch_show (RCore *core, ut64 addr, int mode) {
+R_API int r_core_cmpwatch_show(RCore *core, ut64 addr, int mode) {
 	char cmd[128];
 	RListIter *iter;
 	RCoreCmpWatcher *w;
@@ -54,40 +98,44 @@ R_API int r_core_cmpwatch_show (RCore *core, ut64 addr, int mode) {
 		int is_diff = w->odata? memcmp (w->odata, w->ndata, w->size): 0;
 		switch (mode) {
 		case '*':
-			r_cons_printf ("cw 0x%08"PFMT64x" %d %s%s\n",
-				w->addr, w->size, w->cmd, is_diff? " # differs":"");
+			r_cons_printf ("cw 0x%08"PFMT64x " %d %s%s\n",
+				w->addr, w->size, w->cmd, is_diff? " # differs": "");
 			break;
 		case 'd': // diff
-			if (is_diff)
-				r_cons_printf ("0x%08"PFMT64x" has changed\n", w->addr);
+			if (is_diff) {
+				r_cons_printf ("0x%08"PFMT64x " has changed\n", w->addr);
+			}
 		case 'o': // old contents
-			// use tmpblocksize
+		// use tmpblocksize
 		default:
-			r_cons_printf ("0x%08"PFMT64x"%s\n", w->addr, is_diff? " modified":"");
-			snprintf (cmd, sizeof (cmd), "%s@%"PFMT64d"!%d",
+			r_cons_printf ("0x%08"PFMT64x "%s\n", w->addr, is_diff? " modified": "");
+			snprintf (cmd, sizeof (cmd), "%s@%"PFMT64d "!%d",
 				w->cmd, w->addr, w->size);
 			r_core_cmd0 (core, cmd);
 			break;
 		}
 	}
-	return R_FALSE;
+	return false;
 }
 
-R_API int r_core_cmpwatch_update (RCore *core, ut64 addr) {
+R_API int r_core_cmpwatch_update(RCore *core, ut64 addr) {
 	RCoreCmpWatcher *w;
 	RListIter *iter;
 	r_list_foreach (core->watchers, iter, w) {
 		free (w->odata);
 		w->odata = w->ndata;
 		w->ndata = malloc (w->size);
+		if (!w->ndata) {
+			return false;
+		}
 		r_io_read_at (core->io, w->addr, w->ndata, w->size);
 	}
 	return !r_list_empty (core->watchers);
 }
 
-R_API int r_core_cmpwatch_revert (RCore *core, ut64 addr) {
+R_API int r_core_cmpwatch_revert(RCore *core, ut64 addr) {
 	RCoreCmpWatcher *w;
-	int ret = R_FALSE;
+	int ret = false;
 	RListIter *iter;
 	r_list_foreach (core->watchers, iter, w) {
 		if (w->addr == addr || addr == UT64_MAX) {
@@ -95,65 +143,139 @@ R_API int r_core_cmpwatch_revert (RCore *core, ut64 addr) {
 				free (w->ndata);
 				w->ndata = w->odata;
 				w->odata = NULL;
-				ret = R_TRUE;
+				ret = true;
 			}
 		}
 	}
 	return ret;
 }
 
+static int radare_compare_words(RCore *core, ut64 of, ut64 od, int len, int ws) {
+	int i;
+	bool useColor = r_config_get_i (core->config, "scr.color") != 0;
+	utAny v0, v1;
+	for (i = 0; i < len; i+=ws) {
+		memset (&v0, 0, sizeof (v0));
+		memset (&v1, 0, sizeof (v1));
+		r_io_read_at (core->io, of + i, (ut8*)&v0, ws);
+		r_io_read_at (core->io, od + i, (ut8*)&v1, ws);
+		char ch = (v0.v64 == v1.v64)? '=': '!';
+		const char *color = useColor? ch == '='? "": Color_RED: "";
+		const char *colorEnd = useColor? Color_RESET: "";
+
+		if (useColor) {
+			r_cons_printf (Color_YELLOW"0x%08" PFMT64x"  "Color_RESET, of + i);
+		} else {
+			r_cons_printf ("0x%08" PFMT64x"  ", of + i);
+		}
+		switch (ws) {
+		case 1:
+			r_cons_printf ("%s0x%02x %c 0x%02x%s\n", color,
+				(ut32)(v0.v8 & 0xff), ch, (ut32)(v1.v8 & 0xff), colorEnd);
+			break;
+		case 2:
+			r_cons_printf ("%s0x%04hx %c 0x%04hx%s\n", color,
+				v0.v16, ch, v1.v16, colorEnd);
+			break;
+		case 4:
+			r_cons_printf ("%s0x%08"PFMT32x" %c 0x%08"PFMT32x"%s\n", color,
+				v0.v32, ch, v1.v32, colorEnd);
+			//r_core_cmdf (core, "fd@0x%"PFMT64x, v0.v32);
+			if (v0.v32 != v1.v32) {
+			//	r_core_cmdf (core, "fd@0x%"PFMT64x, v1.v32);
+			}
+			break;
+		case 8:
+			r_cons_printf ("%s0x%016"PFMT64x" %c 0x%016"PFMT64x"%s\n",
+				color, v0.v64, ch, v1.v64, colorEnd);
+			//r_core_cmdf (core, "fd@0x%"PFMT64x, v0.v64);
+			if (v0.v64 != v1.v64) {
+			//	r_core_cmdf (core, "fd@0x%"PFMT64x, v1.v64);
+			}
+			break;
+		}
+	}
+	return 0;
+}
+
 static int radare_compare_unified(RCore *core, ut64 of, ut64 od, int len) {
 	int i, min, inc = 16;
 	ut8 *f, *d;
-	if (len<1)
-		return R_FALSE;
+	if (len < 1) {
+		return false;
+	}
 	f = malloc (len);
+	if (!f) {
+		return false;
+	}
 	d = malloc (len);
+	if (!d) {
+		free (f);
+		return false;
+	}
 	r_io_read_at (core->io, of, f, len);
 	r_io_read_at (core->io, od, d, len);
 	int headers = B_IS_SET (core->print->flags, R_PRINT_FLAGS_HEADER);
-	if (headers)
+	if (headers) {
 		B_UNSET (core->print->flags, R_PRINT_FLAGS_HEADER);
-	for (i=0; i<len; i+=inc) {
-		min = R_MIN (16, (len-i));
-		if (!memcmp (f+i, d+i, min)) {
+	}
+	for (i = 0; i < len; i += inc) {
+		min = R_MIN (16, (len - i));
+		if (!memcmp (f + i, d + i, min)) {
 			r_cons_printf ("  ");
-			r_print_hexdiff (core->print, of+i, f+i, of+i, f+i, min, 0);
+			r_print_hexdiff (core->print, of + i, f + i, of + i, f + i, min, 0);
 		} else {
 			r_cons_printf ("- ");
-			r_print_hexdiff (core->print, of+i, f+i, od+i, d+i, min, 0);
+			r_print_hexdiff (core->print, of + i, f + i, od + i, d + i, min, 0);
 			r_cons_printf ("+ ");
-			r_print_hexdiff (core->print, od+i, d+i, of+i, f+i, min, 0);
+			r_print_hexdiff (core->print, od + i, d + i, of + i, f + i, min, 0);
 		}
 	}
-	if (headers)
+	if (headers) {
 		B_SET (core->print->flags, R_PRINT_FLAGS_HEADER);
-	return R_TRUE;
+	}
+	return true;
 }
 
-static int radare_compare(RCore *core, const ut8 *f, const ut8 *d, int len) {
+static int radare_compare(RCore *core, const ut8 *f, const ut8 *d, int len, int mode) {
 	int i, eq = 0;
-	for (i=0; i<len; i++) {
-		if (f[i]==d[i]) {
+	if (len < 1) {
+		return 0;
+	}
+	for (i = 0; i < len; i++) {
+		if (f[i] == d[i]) {
 			eq++;
 			continue;
 		}
-		r_cons_printf ("0x%08"PFMT64x" (byte=%.2d)   %02x '%c'  ->  %02x '%c'\n",
-			core->offset+i, i+1,
-			f[i], (IS_PRINTABLE(f[i]))?f[i]:' ',
-			d[i], (IS_PRINTABLE(d[i]))?d[i]:' ');
+		switch (mode)
+		{
+		case 0:
+			r_cons_printf ("0x%08"PFMT64x " (byte=%.2d)   %02x '%c'  ->  %02x '%c'\n",
+				core->offset + i, i + 1,
+				f[i], (IS_PRINTABLE (f[i]))? f[i]: ' ',
+				d[i], (IS_PRINTABLE (d[i]))? d[i]: ' ');
+			break;
+		case '*':
+			r_cons_printf ("wx %02x @ 0x%08"PFMT64x "\n",
+				d[i],
+				core->offset + i);
+			break;
+
+		}
 	}
-	eprintf ("Compare %d/%d equal bytes (%d%%)\n", eq, len, (eq/len)*100);
-	return len-eq;
+	if (mode == 0) {
+		eprintf ("Compare %d/%d equal bytes (%d%%)\n", eq, len, (eq / len) * 100);
+	}
+	return len - eq;
 }
 
-static void cmd_cmp_watcher (RCore *core, const char *input) {
+static void cmd_cmp_watcher(RCore *core, const char *input) {
 	char *p, *q, *r = NULL;
 	int size = 0;
 	ut64 addr = 0;
 	switch (*input) {
 	case ' ':
-		p = strdup (input+1);
+		p = strdup (input + 1);
 		q = strchr (p, ' ');
 		if (q) {
 			*q++ = 0;
@@ -164,16 +286,18 @@ static void cmd_cmp_watcher (RCore *core, const char *input) {
 				size = atoi (q);
 			}
 			r_core_cmpwatch_add (core, addr, size, r);
-			//eprintf ("ADD (%llx) %d (%s)\n", addr, size, r);
-		} else eprintf ("Missing parameters\n");
+			// eprintf ("ADD (%llx) %d (%s)\n", addr, size, r);
+		} else {
+			eprintf ("Missing parameters\n");
+		}
 		free (p);
 		break;
 	case 'r':
-		addr = input[1]? r_num_math (core->num, input+1): UT64_MAX;
+		addr = input[1]? r_num_math (core->num, input + 1): UT64_MAX;
 		r_core_cmpwatch_revert (core, addr);
 		break;
 	case 'u':
-		addr = input[1]? r_num_math (core->num, input+1): UT64_MAX;
+		addr = input[1]? r_num_math (core->num, input + 1): UT64_MAX;
 		r_core_cmpwatch_update (core, addr);
 		break;
 	case '*':
@@ -182,214 +306,570 @@ static void cmd_cmp_watcher (RCore *core, const char *input) {
 	case '\0':
 		r_core_cmpwatch_show (core, UT64_MAX, 0);
 		break;
-	case '?':
-		r_cons_printf (
-			"Usage: cw[?] [...]\n"
-			"  cw              list all compare watchers\n"
-			"  cw*             list compare watchers in r2 cmds\n"
-			"  cw addr         list all compare watchers\n"
-			"  cw addr sz cmd  add a memory watcher\n"
-			//"  cws [addr]      show watchers\n"
-			"  cwu [addr]      update watchers\n"
-			"  cwr [addr]      reset/revert watchers\n"
-			);
-		break;
+	case '?': {
+		const char *help_message[] = {
+			"Usage: cw", "", "Watcher commands",
+			"cw", "", "List all compare watchers",
+			"cw", " addr", "List all compare watchers",
+			"cw", " addr sz cmd", "Add a memory watcher",
+			// "cws", " [addr]", "Show watchers",
+			"cw", "*", "List compare watchers in r2 cmds",
+			"cwr", " [addr]", "Reset/revert watchers",
+			"cwu", " [addr]", "Update watchers",
+			NULL
+		};
+		r_core_cmd_help (core, help_message);
+	}
+		  break;
 	}
 }
 
+static int cmd_cmp_disasm(RCore *core, const char *input, int mode) {
+	RAsmOp op, op2;
+	int i, j, iseq;
+	char colpad[80];
+	int hascolor = r_config_get_i (core->config, "scr.color");
+	int cols = r_config_get_i (core->config, "hex.cols") * 2;
+	ut64 off = r_num_math (core->num, input);
+	ut8 *buf = calloc (core->blocksize + 32, 1);
+	if (!buf) {
+		return false;
+	}
+	r_core_read_at (core, off, buf, core->blocksize + 32);
+	switch (mode) {
+	case 'c': // columns
+		for (i = j = 0; i < core->blocksize && j < core->blocksize;) {
+			// dis A
+			r_asm_set_pc (core->assembler, core->offset + i);
+			(void) r_asm_disassemble (core->assembler, &op,
+				core->block + i, core->blocksize - i);
+
+			// dis B
+			r_asm_set_pc (core->assembler, off + i);
+			(void) r_asm_disassemble (core->assembler, &op2,
+				buf + j, core->blocksize - j);
+
+			// show output
+			iseq = (!strcmp (op.buf_asm, op2.buf_asm));
+			memset (colpad, ' ', sizeof(colpad));
+			{
+				int pos = strlen (op.buf_asm);
+				pos = (pos > cols)? 0: cols - pos;
+				colpad[pos] = 0;
+			}
+			if (hascolor) {
+				r_cons_printf (iseq? Color_GREEN: Color_RED);
+			}
+			r_cons_printf (" 0x%08"PFMT64x "  %s %s",
+				core->offset + i, op.buf_asm, colpad);
+			r_cons_printf ("%c 0x%08"PFMT64x "  %s\n",
+				iseq? '=': '!', off + j, op2.buf_asm);
+			if (hascolor) {
+				r_cons_printf (Color_RESET);
+			}
+			if (op.size < 1) {
+				op.size = 1;
+			}
+			i += op.size;
+			if (op2.size < 1) {
+				op2.size = 1;
+			}
+			j += op2.size;
+		}
+		break;
+	case 'u': // unified
+		for (i = j = 0; i < core->blocksize && j < core->blocksize;) {
+			// dis A
+			r_asm_set_pc (core->assembler, core->offset + i);
+			(void) r_asm_disassemble (core->assembler, &op,
+				core->block + i, core->blocksize - i);
+
+			// dis B
+			r_asm_set_pc (core->assembler, off + i);
+			(void) r_asm_disassemble (core->assembler, &op2,
+				buf + j, core->blocksize - j);
+
+			// show output
+			iseq = (!strcmp (op.buf_asm, op2.buf_asm));
+			if (iseq) {
+				r_cons_printf (" 0x%08"PFMT64x "  %s\n",
+					core->offset + i, op.buf_asm);
+			} else {
+				if (hascolor) {
+					r_cons_printf (Color_RED);
+				}
+				r_cons_printf ("-0x%08"PFMT64x "  %s\n",
+					core->offset + i, op.buf_asm);
+				if (hascolor) {
+					r_cons_printf (Color_GREEN);
+				}
+				r_cons_printf ("+0x%08"PFMT64x "  %s\n",
+					off + j, op2.buf_asm);
+				if (hascolor) {
+					r_cons_printf (Color_RESET);
+				}
+			}
+			if (op.size < 1) {
+				op.size = 1;
+			}
+			i += op.size;
+			if (op2.size < 1) {
+				op2.size = 1;
+			}
+			j += op2.size;
+		}
+		break;
+	}
+	return 0;
+}
+
+static int cmd_cp(void *data, const char *input) {
+	RCore *core = (RCore *)data;
+	if (input[1] == '.') {
+		char *file = r_core_cmd_strf (core, "ij~{core.file}");
+		r_str_trim (file);
+		char *newfile = r_str_newf ("%s.%s", file, input + 2);
+		r_file_copy (file, newfile);
+		free (file);
+		free (newfile);
+		return true;
+	}
+	if (strlen (input) < 3) {
+		eprintf ("Usage: cp src dst\n");
+		eprintf ("Usage: cp.orig  # cp $file $file.orig\n");
+		return false;
+	}
+	char *src = strdup (input + 2);
+	char *dst = strchr (src, ' ');
+	if (dst) {
+		*dst++ = 0;
+		r_str_trim (src);
+		r_str_trim (dst);
+		bool rc = r_file_copy (src, dst);
+		free (src);
+		return rc;
+	}
+	eprintf ("Usage: cp src dst\n");
+	free (src);
+	return false;
+}
+
 static int cmd_cmp(void *data, const char *input) {
+	static char *oldcwd = NULL;
+	int ret = 0, i, mode = 0;
 	RCore *core = data;
-	FILE *fd;
+	ut64 val = UT64_MAX;
+	char *filled;
 	ut8 *buf;
-	int ret;
 	ut16 v16;
 	ut32 v32;
 	ut64 v64;
-	ut64 val = UT64_MAX;
+	FILE *fd;
+	const ut8* block = core->block;
 
 	switch (*input) {
-	case 'a':
-		{
-			int sz;
-			char *p = strchr (input+1, ' ');
-			if (p) {
-				char *data = r_file_slurp (p+1, &sz);
-				if (data) {
-					r_cons_memcat (data, sz);
-					free (data);
-				} else eprintf ("No such file or directory\n");
-			} else eprintf ("Usage: cat [file]\n");
-		}
+	case 'p':
+		return cmd_cp (data, input);
 		break;
+	case 'a': // "cat"
+		if (input[1] == 't') {
+			const char *path = r_str_trim_ro (input + 2);
+			if (r_fs_check (core->fs, path)) {
+				r_core_cmdf (core, "mg %s", path);
+			} else {
+				char *res = r_syscmd_cat (path);
+				if (res) {
+					r_cons_print (res);
+					free (res);
+				}
+			}
+		}
 		break;
 	case 'w':
-		cmd_cmp_watcher (core, input+1);
+		cmd_cmp_watcher (core, input + 1);
 		break;
-	case ' ':
-		val = radare_compare (core, core->block, (ut8*)input+1, strlen (input+1)+1);
-		break;
-	case 'x':
-		if (input[1]!=' ') {
-			eprintf ("Usage: cx 001122'\n");
+	case '*':
+		if (!input[2]) {
+			eprintf ("Usage: cx* 00..22'\n");
 			return 0;
 		}
-		buf = (ut8*)malloc (strlen (input+2)+1);
-		ret = r_hex_str2bin (input+2, buf);
-		if (ret<1) eprintf ("Cannot parse hexpair\n");
-		else val = radare_compare (core, core->block, buf, ret);
+
+		val = radare_compare (core, block, (ut8 *) input + 2,
+			strlen (input + 2) + 1, '*');
+		break;
+	case ' ':
+	{
+		char *str = strdup (input + 1);
+		int len = r_str_unescape (str);
+		val = radare_compare (core, block, (ut8 *) str, len, 0);
+		free (str);
+	}
+	break;
+	case 'x':
+		switch (input[1]) {
+		case ' ':
+			mode = 0;
+			input += 2;
+			break;
+		case '*':
+			if (input[2] != ' ') {
+				eprintf ("Usage: cx* 00..22'\n");
+				return 0;
+			}
+			mode = '*';
+			input += 3;
+			break;
+		default:
+			eprintf ("Usage: cx 00..22'\n");
+			return 0;
+		}
+		if (!(filled = (char *) malloc (strlen (input) + 1))) {
+			return false;
+		}
+		memcpy (filled, input, strlen (input) + 1);
+		if (!(buf = (ut8 *) malloc (strlen (input) + 1))) {
+			free (filled);
+			return false;
+		}
+		ret = r_hex_bin2str (block, strlen (input) / 2, (char *) buf);
+		for (i = 0; i < ret * 2; i++) {
+			if (filled[i] == '.') {
+				filled[i] = buf[i];
+			}
+		}
+
+		ret = r_hex_str2bin (filled, buf);
+		if (ret < 1) {
+			eprintf ("Cannot parse hexpair\n");
+		} else {
+			val = radare_compare (core, block, buf, ret, mode);
+		}
 		free (buf);
+		free (filled);
 		break;
 	case 'X':
 		buf = malloc (core->blocksize);
-		ret = r_io_read_at (core->io, r_num_math (core->num, input+1),
-			buf, core->blocksize);
-		val = radare_compare (core, core->block, buf, ret);
-		free (buf);
+		if (buf) {
+			if (!r_io_read_at (core->io, r_num_math (core->num,
+					    input + 1), buf, core->blocksize)) {
+				eprintf ("Cannot read hexdump\n");
+			} else {
+				val = radare_compare (core, block, buf, ret, mode);
+			}
+			free (buf);
+		}
+		return false;
 		break;
 	case 'f':
-		if (input[1]!=' ') {
+		if (input[1] != ' ') {
 			eprintf ("Please. use 'cf [file]'\n");
-			return 0;
+			return false;
 		}
-		fd = r_sandbox_fopen (input+2, "rb");
-		if (fd == NULL) {
-			eprintf ("Cannot open file '%s'\n", input+2);
-			return 0;
+		fd = r_sandbox_fopen (input + 2, "rb");
+		if (!fd) {
+			eprintf ("Cannot open file '%s'\n", input + 2);
+			return false;
 		}
-		buf = (ut8 *)malloc (core->blocksize);
-		fread (buf, 1, core->blocksize, fd);
-		fclose (fd);
-		val = radare_compare (core, core->block, buf, core->blocksize);
-		free (buf);
-		break;
-	case 'd':
-		while (input[1]==' ') input++;
-		if (r_sandbox_chdir (input+1)==-1)
-			eprintf ("Cannot chdir\n");
-		break;
-	case '2':
-		v16 = (ut16) r_num_math (core->num, input+1);
-		val = radare_compare (core, core->block, (ut8*)&v16, sizeof (v16));
-		break;
-	case '4':
-		v32 = (ut32) r_num_math (core->num, input+1);
-		val = radare_compare (core, core->block, (ut8*)&v32, sizeof (v32));
-		break;
-	case '8':
-		v64 = (ut64) r_num_math (core->num, input+1);
-		val = radare_compare (core, core->block, (ut8*)&v64, sizeof (v64));
-		break;
-#if 0
-	case 'c':
-		radare_compare_code (
-			r_num_math (core->num, input+1),
-			core->block, core->blocksize);
-		break;
-	case 'D':
-		{ // XXX ugly hack
-		char cmd[1024];
-		sprintf (cmd, "radiff -b %s %s", ".curblock", input+2);
-		r_file_dump (".curblock", config.block, config.block_size);
-		radare_system(cmd);
-		unlink(".curblock");
+		buf = (ut8 *) malloc (core->blocksize);
+		if (buf) {
+			if (fread (buf, 1, core->blocksize, fd) < 1) {
+				eprintf ("Cannot read file %s\n", input + 2);
+			} else {
+				val = radare_compare (core, block, buf, core->blocksize, 0);
+			}
+			fclose (fd);
+			free (buf);
+		} else {
+			fclose (fd);
+			return false;
 		}
 		break;
-#endif
-	case 'c':
-		{
-		int col = core->cons->columns>123;
-		ut8 *b = malloc (core->blocksize);
-		ut64 addr = r_num_math (core->num, input+2);
-		if (!b) return 0;
-		memset (b, 0xff, core->blocksize);
-		r_core_read_at (core, addr, b, core->blocksize);
-		r_print_hexdiff (core->print, core->offset, core->block,
-			addr, b, core->blocksize, col);
-		free (b);
+	case 'd': // "cd"
+		while (input[1] == ' ') input++;
+		if (input[1]) {
+			if (!strcmp (input + 1, "-")) {
+				if (oldcwd) {
+					char *newdir = oldcwd;
+					oldcwd = r_sys_getdir ();
+					if (r_sandbox_chdir (newdir) == -1) {
+						eprintf ("Cannot chdir to %s\n", newdir);
+						free (oldcwd);
+						oldcwd = newdir;
+					} else {
+						free (newdir);
+					}
+				} else {
+					// nothing to do here
+				}
+			} else if (input[1] == '~' && input[2] == '/') {
+				char *homepath = r_str_home (input + 3);
+				if (homepath) {
+					if (*homepath) {
+						free (oldcwd);
+						oldcwd = r_sys_getdir ();
+						if (r_sandbox_chdir (homepath) == -1) {
+							eprintf ("Cannot chdir to %s\n", homepath);
+						}
+					}
+					free (homepath);
+				} else {
+					eprintf ("Cannot find home\n");
+				}
+			} else {
+				free (oldcwd);
+				oldcwd = r_sys_getdir ();
+				if (r_sandbox_chdir (input + 1) == -1) {
+					eprintf ("Cannot chdir to %s\n", input + 1);
+				}
+			}
+		} else {
+			char *home = r_sys_getenv (R_SYS_HOME);
+			if (!home || r_sandbox_chdir (home) == -1) {
+				eprintf ("Cannot find home.\n");
+			}
+			free (home);
 		}
 		break;
-	case 'g':
-		{ // XXX: this is broken
-			int diffops = 0;
+	case '2': // "c2"
+		v16 = (ut16) r_num_math (core->num, input + 1);
+		val = radare_compare (core, block, (ut8 *) &v16, sizeof (v16), 0);
+		break;
+	case '4': // "c4"
+		v32 = (ut32) r_num_math (core->num, input + 1);
+		val = radare_compare (core, block, (ut8 *) &v32, sizeof (v32), 0);
+		break;
+	case '8': // "c8"
+		v64 = (ut64) r_num_math (core->num, input + 1);
+		val = radare_compare (core, block, (ut8 *) &v64, sizeof (v64), 0);
+		break;
+	case 'c': // "cc"
+		if (input[1] == 'd') { // "ccd"
+			cmd_cmp_disasm (core, input + 2, 'c');
+		} else {
+			ut32 oflags = core->print->flags;
+			ut64 addr = 0; // TOTHINK: Not sure what default address should be
+			if (input[1] == 'c') { // "ccc"
+				core->print->flags |= R_PRINT_FLAGS_DIFFOUT;
+				addr = r_num_math (core->num, input + 2);
+			} else {
+				if (*input && input[1]) {
+					addr = r_num_math (core->num, input + 2);
+				}
+			}
+			int col = core->cons->columns > 123;
+			ut8 *b = malloc (core->blocksize);
+			if (b != NULL) {
+				memset (b, 0xff, core->blocksize);
+				r_core_read_at (core, addr, b, core->blocksize);
+				r_print_hexdiff (core->print, core->offset, block,
+					addr, b, core->blocksize, col);
+				free (b);
+			}
+			core->print->flags = oflags;
+		}
+		break;
+	case 'g': // "cg"
+	{          // XXX: this is broken
+		int diffops = 0;
 		RCore *core2;
 		char *file2 = NULL;
-		if (input[1]=='o') {
-			file2 = (char*)r_str_chop_ro (input+2);
-			r_anal_diff_setup (core->anal, R_TRUE, -1, -1);
-		} else
-		if (input[1]==' ') {
-			file2 = (char*)r_str_chop_ro (input+2);
-			r_anal_diff_setup (core->anal, R_FALSE, -1, -1);
-		} else {
-			eprintf ("Usage: cg[o] [file]\n");
-			eprintf (" cg  - byte-per-byte code graph diff\n");
-			eprintf (" cgo - opcode-bytes code graph diff\n");
-			return R_FALSE;
+		switch (input[1]) {
+		case 'o':         // "cgo"
+			file2 = (char *) r_str_trim_ro (input + 2);
+			r_anal_diff_setup (core->anal, true, -1, -1);
+			break;
+		case 'f':         // "cgf"
+			eprintf ("TODO: agf is experimental\n");
+			r_anal_diff_setup (core->anal, true, -1, -1);
+			r_core_gdiff_fcn (core, core->offset,
+				r_num_math (core->num, input + 2));
+			return false;
+		case ' ':
+			file2 = (char *) r_str_trim_ro (input + 2);
+			r_anal_diff_setup (core->anal, false, -1, -1);
+			break;
+		default: {
+			const char *help_message[] = {
+				"Usage: cg", "", "Graph code commands",
+				"cg", "", "diff ratio among functions (columns: off-A, match-ratio, off-B)",
+				"cgf", "[fcn]", "Compare functions (curseek vs fcn)",
+				"cgo", "", "Opcode-bytes code graph diff",
+				NULL
+			};
+			r_core_cmd_help (core, help_message);
+			return false;
+		}
+		}
+
+		if (r_file_size (file2) <= 0) {
+			eprintf ("Cannot compare with file %s\n", file2);
+			return false;
 		}
 
 		if (!(core2 = r_core_new ())) {
 			eprintf ("Cannot init diff core\n");
-			return R_FALSE;
+			return false;
 		}
+		r_core_loadlibs (core2, R_CORE_LOADLIBS_ALL, NULL);
 		core2->io->va = core->io->va;
 		core2->anal->split = core->anal->split;
 		if (!r_core_file_open (core2, file2, 0, 0LL)) {
 			eprintf ("Cannot open diff file '%s'\n", file2);
 			r_core_free (core2);
-			return R_FALSE;
+			return false;
 		}
 		// TODO: must replicate on core1 too
-		r_config_set_i (core2->config, "io.va", R_TRUE);
-		r_config_set_i (core2->config, "anal.split", R_TRUE);
-                r_anal_diff_setup (core->anal, diffops, -1, -1);
-                r_anal_diff_setup (core2->anal, diffops, -1, -1);
+		r_config_set_i (core2->config, "io.va", true);
+		r_config_set_i (core2->config, "anal.split", true);
+		r_anal_diff_setup (core->anal, diffops, -1, -1);
+		r_anal_diff_setup (core2->anal, diffops, -1, -1);
 
 		r_core_bin_load (core2, file2,
 			r_config_get_i (core->config, "bin.baddr"));
 		r_core_gdiff (core, core2);
 		r_core_diff_show (core, core2);
+		/* exchange a segfault with a memleak */
+		core2->config = NULL;
 		r_core_free (core2);
-		}
-		break;
-	case 'u':
-		if (input[1] == ' ') {
-			ut64 off = r_num_math (core->num, input+1);
-			radare_compare_unified (core, core->offset, off,
+	}
+	break;
+	case 'u': // "cu"
+		switch (input[1]) {
+		case '.':
+		case ' ':
+			radare_compare_unified (core, core->offset,
+				r_num_math (core->num, input + 2),
 				core->blocksize);
-		} else {
-			r_cons_strcat (
-			"|Usage: cu [offset]  # creates a unified hex patch\n"
-			"|  cu $$+1 > p       # compare current seek and +1\n"
-			"|  wu p              # apply unified hex patch\n");
+			break;
+		case '1':
+		case '2':
+		case '4':
+		case '8':
+			radare_compare_words (core, core->offset,
+				r_num_math (core->num, input + 2),
+				core->blocksize, input[1] - '0');
+			break;
+		case 'd':
+			cmd_cmp_disasm (core, input + 2, 'u');
+			break;
+		default: {
+			const char *help_msg[] = {
+				"Usage: cu", " [offset]", "# Prints unified comparison to make hexpatches",
+				"cu", " $$+1 > p", "Compare hexpairs from  current seek and +1",
+				"cu1", " $$+1 > p", "Compare bytes from current seek and +1",
+				"cu2", " $$+1 > p", "Compare words (half, 16bit) from current seek and +1",
+				"cu4", " $$+1 > p", "Compare dwords from current seek and +1",
+				"cu8", " $$+1 > p", "Compare qwords from current seek and +1",
+				"cud", " $$+1 > p", "Compare disasm current seek and +1",
+				"wu", " p", "Apply unified hex patch (see output of cu)",
+				NULL
+			};
+			r_core_cmd_help (core, help_msg);
+		}
 		}
 		break;
 	case '?':
-		r_cons_strcat (
-		"|Usage: c[?dfx] [argument]\n"
-		"| c  [string]    Compares a plain with escaped chars string\n"
-		"| cc [at] [(at)] Compares in two hexdump columns of block size\n"
-		//"| cc [offset]   Code bindiff current block against offset\n"
-		"| c4 [value]     Compare a doubleword from a math expression\n"
-		//"| cD [file]     Like above, but using radiff -b\n");
-		"| c8 [value]     Compare a quadword from a math expression\n"
-		"| cx [hexpair]   Compare hexpair string\n"
-		"| cX [addr]      Like 'cc' but using hexdiff output\n"
-		"| cf [file]      Compare contents of file at current seek\n"
-		"| cg[o] [file]   Graphdiff current file and [file]\n"
-		"| cu [addr] @at  Compare memory hexdumps of $$ and dst in unified diff\n"
-		"| cw[us?] [...]  Compare memory watchers\n"
-		"| cat  [file]    Show contents of file (see pwd, ls)\n"
-		"| cl|cls|clear   Clear screen\n");
+		r_core_cmd_help (core, help_msg_c);
 		break;
-	case 'l':
-		r_cons_clear ();
-		r_cons_gotoxy (0, 0);
+	case 'v': { // "cv"
+		int sz = input[1];
+		if (sz == ' ') {
+			switch (r_config_get_i (core->config, "asm.bits")) {
+			case 8: sz = '1'; break;
+			case 16: sz = '2'; break;
+			case 32: sz = '4'; break;
+			case 64: sz = '8'; break;
+			default: sz = '4'; break; // default
+			}
+		}
+		// TODO: honor endian
+		switch (sz) {
+		case '1': { // "cv1"
+			ut8 n = (ut8) r_num_math (core->num, input + 2);
+			core->num->value = 1;
+			if (block[0] == n) {
+				r_cons_printf ("0x%08"PFMT64x "\n", core->offset);
+				core->num->value = 0;
+			}
+			break;
+		}
+		case '2': { // "cv2"
+			ut16 n = (ut16) r_num_math (core->num, input + 2);
+			core->num->value = 1;
+			if (core->blocksize >= 2 && *(ut16*)block == n) {
+				r_cons_printf ("0x%08"PFMT64x "\n", core->offset);
+				core->num->value = 0;
+			}
+			break;
+		}
+		case '4': { // "cv4"
+			ut32 n = (ut32) r_num_math (core->num, input + 2);
+			core->num->value = 1;
+			if (core->blocksize >= 4 && *(ut32*)block == n) {
+				r_cons_printf ("0x%08"PFMT64x "\n", core->offset);
+				core->num->value = 0;
+			}
+			break;
+		}
+		case '8': { // "cv8"
+			ut64 n = (ut64) r_num_math (core->num, input + 2);
+			core->num->value = 1;
+			if (core->blocksize >= 8 && *(ut64*)block == n) {
+				r_cons_printf ("0x%08"PFMT64x "\n", core->offset);
+				core->num->value = 0;
+			}
+			break;
+		}
+		default:
+		case '?':
+			eprintf ("Usage: cv[1248] [num]\n"
+				"Show offset if current value equals to the one specified\n"
+				" /v 18312   # serch for a known value\n"
+				" dc\n"
+				" cv4 18312 @@ hit*\n"
+				" dc\n");
+			break;
+		}
+	}
+	break;
+	case 'V': { // "cV"
+		int sz = input[1];
+		if (sz == ' ') {
+			switch (r_config_get_i (core->config, "asm.bits")) {
+			case 8: sz = '1'; break;
+			case 16: sz = '2'; break;
+			case 32: sz = '4'; break;
+			case 64: sz = '8'; break;
+			default: sz = '4'; break; // default
+			}
+		} else if (sz == '?') {
+			eprintf ("Usage: cV[1248] [addr] @ addr2\n"
+				"Compare n bytes from one address to current one and return in $? 0 or 1\n");
+		}
+		sz -= '0';
+		if (sz > 0) {
+			ut64 at = r_num_math (core->num, input + 2);
+			ut8 buf[8] = {0};
+			r_io_read_at (core->io, at, buf, sizeof (buf));
+			core->num->value = memcmp (buf, core->block, sz)? 1: 0;
+		}
+		break;
+	}
+	case 'l': // "cl"
+		if (strchr (input, 'f')) {
+			r_cons_flush ();
+		} else if (input[1] == 0) {
+			r_cons_fill_line ();
+			// r_cons_clear_line (0);
+		} else if (!strchr (input, '0')) {
+			r_cons_clear00 ();
+		}
 		break;
 	default:
-		eprintf ("|Usage: c[?48cdDxfw] [argument]\n");
+		r_core_cmd_help (core, help_msg_c);
 	}
-	if (val != UT64_MAX)
+	if (val != UT64_MAX) {
 		core->num->value = val;
+	}
 	return 0;
 }
-

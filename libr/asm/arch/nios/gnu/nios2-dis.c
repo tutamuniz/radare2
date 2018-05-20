@@ -26,6 +26,7 @@
 #include "libiberty.h"
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
 
 /* No symbol table is available when this code runs out in an embedded
    system as when it is used for disassembler support in a monitor.  */
@@ -80,7 +81,7 @@ nios2_init_opcode_hash (void)
 	  {
 	    new_hash =
 	      (nios2_opcode_hash *) malloc (sizeof (nios2_opcode_hash));
-	    if (new_hash == NULL)
+	    if (!new_hash)
 	      {
 		fprintf (stderr,
 			 "error allocating memory...broken disassembler\n");
@@ -253,7 +254,7 @@ nios2_print_insn_arg (const char *argptr,
       break;
     case 'i':
       /* 16-bit signed immediate.  */
-      i = (signed) (GET_INSN_FIELD (IMM16, opcode) << 16) >> 16;
+      i = (int) (GET_INSN_FIELD (IMM16, opcode) << 16) >> 16;
       (*info->fprintf_func) (info->stream, "%ld", i);
       break;
     case 'u':
@@ -263,7 +264,7 @@ nios2_print_insn_arg (const char *argptr,
       break;
     case 'o':
       /* 16-bit signed immediate address offset.  */
-      i = (signed) (GET_INSN_FIELD (IMM16, opcode) << 16) >> 16;
+      i = (int) (GET_INSN_FIELD (IMM16, opcode) << 16) >> 16;
       address = address + 4 + i;
       (*info->print_address_func) (address, info);
       break;

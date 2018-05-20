@@ -3,8 +3,7 @@
 #include <r_lib.h>
 #include <string.h>
 
-static int mal_dis(RAsmOp *op, ut64 c, ut8 *buf, ut64 len)
-{
+static int mal_dis(RAsmOp *op, ut64 c, const ut8 *buf, ut64 len) {
 	if(len) {
 		switch ((buf[0]+c)%94) {
 			case 4:
@@ -31,32 +30,29 @@ static int mal_dis(RAsmOp *op, ut64 c, ut8 *buf, ut64 len)
 			default:
 				sprintf(op->buf_asm, "nop");
 		}
-		return R_TRUE;
+		return true;
 	}
-	return R_FALSE;
+	return false;
 }
 
-static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, ut64 len)
-{
+static int __disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	return op->size = mal_dis(op, a->pc, buf, len);
 }
 
-
 RAsmPlugin r_asm_plugin_malbolge = {
 	.name = "malbolge",
-	.desc = "Malbolge disassembler plugin",
+	.desc = "Malbolge Ternary VM",
 	.arch = "malbolge",
 	.license = "LGPL3",
 	.bits = 32,
-	.init = NULL,
-	.fini = NULL,
-	.disassemble = &disassemble,
-	.assemble = NULL,
+	.endian = R_SYS_ENDIAN_NONE,
+	.disassemble = &__disassemble
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_malbolge
+	.data = &r_asm_plugin_malbolge,
+	.version = R2_VERSION
 };
 #endif

@@ -1,12 +1,19 @@
 include ../../../global.mk
 F=
+F+= dos-x86-16
+F+= ios-x86-32
+F+= ios-arm-32
+F+= ios-arm-64
 F+= linux-x86-32
 F+= linux-x86-64
 F+= linux-arm-32
+F+= linux-arm-64
 F+= linux-mips-32
 F+= linux-sparc-32
 F+= darwin-x86-32
 F+= darwin-x86-64
+F+= darwin-arm-32
+F+= darwin-arm-64
 F+= netbsd-x86-32
 F+= freebsd-x86-32
 F+= openbsd-x86-32
@@ -15,48 +22,61 @@ F+= windows-x86-32
 F+= windows-x86-64
 
 include $(TOP)/config-user.mk
+HOST_CC?=gcc
 
 F_SDB=$(addsuffix .sdb,$F)
 
 SDBPATH=$(LTOP)/../shlr/sdb/
-SDB=$(SDBPATH)/sdb
+ifeq ($(BUILD_OS),windows)
+BUILD_EXT_EXE=.exe
+else
+BUILD_EXT_EXE=
+endif
+SDB=$(SDBPATH)/sdb${BUILD_EXT_EXE}
 
 all: ${SDB}
-	@${MAKE} compile
+	@$(MAKE) compile
 
 compile: ${F_SDB}
 
-linux-x86-32.sdb: linux-x86-32
-
-%.sdb:%
+%.sdb:%.sdb.txt
 ifneq ($(SILENT),)
 	@echo "SDB $<"
+	@rm -f $@
+	@"${SHELL}" gen.sh < $< | ${SDB} $@ =
+	@test -f $@
+else
+	rm -f $@
+	"${SHELL}" gen.sh < $< | ${SDB} $@ =
+	test -f $@
 endif
-	${SHELL} gen.sh < $< | ${SDB} $<.sdb =
 
 clean:
 	rm -f *.sdb
 
 ${SDB}:
-	cp -rf $(SDBPATH)/src $(SDBPATH)/src-native
-	#cd $(LTOP)/db/sdb/src-native && ${MAKE} -j ${MAKE_JOBS} ARCH=xxx CC=gcc clean sdb
-	#${CFLAGS}'
-	# TODO use HOST_CC
-	cd $(SDBPATH)/src-native && CFLAGS="-w ${CPPFLAGS}" \
-		${MAKE} -j 1 ARCH=xxx CC=gcc clean sdb
-	cp -f $(SDBPATH)/src-native/sdb $(SDBPATH)/sdb
-	rm -rf $(SDBPATH)/src-native
+	@echo "Cannot find ${SDB}"
+	@false
+
+#	cp -rf "$(SDBPATH)/src" "$(SDBPATH)/src-native"
+#	cd "$(SDBPATH)/src-native" && CFLAGS="-w ${CPPFLAGS}" \
+#		$(MAKE) -j 1 ARCH=xxx CC=${HOST_CC} clean sdb
+#	cp -f "$(SDBPATH)/src-native/sdb" "$(SDBPATH)/sdb"
+#	rm -rf "$(SDBPATH)/src-native"
 
 .PHONY: all clean install install-symlink symstall
 
+SYSCALLPATH=${DESTDIR}${DATADIR}/radare2/${VERSION}/syscall
+
 install: ${F_SDB}
-	mkdir -p ${DESTDIR}${LIBDIR}/radare2/${VERSION}/syscall
-	cp -f *.sdb ${DESTDIR}${LIBDIR}/radare2/${VERSION}/syscall
+	-rm -rf "${SYSCALLPATH}"
+	mkdir -p "${SYSCALLPATH}"
+	cp -f *.sdb "${SYSCALLPATH}"
 
 CWD=$(shell pwd)
 symstall install-symlink: ${F_SDB}
-	mkdir -p ${DESTDIR}${LIBDIR}/radare2/${VERSION}/syscall
-	for a in *.sdb ; do ln -fs ${CWD}/$$a ${DESTDIR}${LIBDIR}/radare2/${VERSION}/syscall/$$a ; done
+	mkdir -p "${SYSCALLPATH}"
+	for FILE in *.sdb ; do ln -fs "${CWD}/$$FILE" "${SYSCALLPATH}/$$FILE" ; done
 
 uninstall:
-	rm -rf ${DESTDIR}${LIBDIR}/radare2/syscall
+	rm -rf "${SYSCALLPATH}"

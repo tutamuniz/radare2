@@ -11,15 +11,15 @@ typedef struct java_op {
 	ut64 op_type;
 } JavaOp;
 
-extern struct java_op java_ops[];
-
-int java_print_opcode(RBinJavaObj *obj, ut64 addr, int idx, const ut8 *bytes, char *output, int outlen);
-unsigned short read_short(FILE *fd);
-
-int java_classdump(const char *file, int verbose);
-
-R_API int r_java_disasm(RBinJavaObj *obj, ut64 addr, const ut8 *bytes, char *output, int len);
-R_API int r_java_assemble(ut8 *bytes, const char *string);
-R_API void r_java_set_obj(RBinJavaObj *obj);
+#ifndef R_IPI
+#define R_IPI
+#endif
+#define JAVA_OPS_COUNT 297
+extern struct java_op JAVA_OPS[JAVA_OPS_COUNT];
+R_API int java_print_opcode(RBinJavaObj *obj, ut64 addr, int idx, const ut8 *bytes, int len, char *output, int outlen);
+R_API int r_java_disasm(RBinJavaObj *obj, ut64 addr, const ut8 *bytes, int len, char *output, int outlen);
+R_API int r_java_assemble(ut64 addr, ut8 *bytes, const char *string);
+//R_API void r_java_set_obj(RBinJavaObj *obj);
+R_API void r_java_new_method (void);
 
 #endif

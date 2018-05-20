@@ -1,6 +1,5 @@
 ifeq ($(_INCLUDE_GLOBAL_MK_),)
 _INCLUDE_GLOBAL_MK_=1
-RELEASE=1
 DESTDIR=
 COMPILER?=gcc
 
@@ -15,18 +14,18 @@ else
 SILENT=
 endif
 
+ifndef USE_GIT_URLS
+GIT_PREFIX=https://
+else
+GIT_PREFIX=git://
+endif
+
 # verbose error messages everywhere
 STATIC_DEBUG=0
 
-ifeq (${RELEASE},1)
 PREFIX=/usr/local
-else
-PREFIX=${PWD}/prefix
-VERSION=`date '+%Y%m%d'`
-endif
 
-PFX=${DESTDIR}${PREFIX}
-MDR=${DESTDIR}${MANDIR}
+rmdblslash=$(subst //,/,$(subst //,/,$(subst /$$,,$1)))
 
 LIBDIR=${PREFIX}/lib
 WWWROOT=${DATADIR}/radare2/${VERSION}/www
@@ -39,10 +38,11 @@ endif
 
 .c.o:
 ifneq ($(SILENT),)
-	@echo CC $(shell basename $<)
+	@echo "CC $(shell basename $<)"
 endif
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 -include $(TOP)/config-user.mk
+-include $(TOP)/mk/platform.mk
 -include $(TOP)/mk/${COMPILER}.mk
 endif

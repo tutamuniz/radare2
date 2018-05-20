@@ -5,16 +5,16 @@ CFLAGS+=-DCORELIB -Iarch/include -Iarch
 SHLR=../../shlr/
 
 include ../config.mk
-CFLAGS+=-Ip/grub/include
+CFLAGS+=-I$(SHLR)/grub/include
 LDFLAGS+=$(SHLR)/grub/libgrubfs.a
 
 EXTRA_TARGETS=plugins
 foo:
-	for a in pre plugins ${LIBSO} ${LIBAR} ; do ${MAKE} $$a ; done
+	for TARGET in pre plugins ${LIBSO} ${LIBAR} ; do ${MAKE} $$TARGET ; done
 
 include ${STATIC_FS_PLUGINS}
 STATIC_OBJS=$(subst ..,p/..,$(subst fs_,p/fs_,$(STATIC_OBJ)))
-OBJS=${STATIC_OBJS} fs.o file.o 
+OBJS=${STATIC_OBJS} fs.o file.o shell.o
 #p/grub/main.o
 
 #p/grub/libgrubfs.a:

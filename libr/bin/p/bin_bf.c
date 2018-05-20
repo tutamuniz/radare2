@@ -1,59 +1,76 @@
-/* radare - LGPL - Copyright 2013 - pancake */
+/* radare - LGPL - Copyright 2013-2018 - pancake */
 
 #include <r_types.h>
 #include <r_util.h>
 #include <r_lib.h>
 #include <r_bin.h>
 
-static int check(RBinFile *arch);
-
-static int load(RBinFile *arch) {
-	if (check (arch))
-		return R_TRUE;
-	return R_FALSE;
+static void *load_bytes(RBinFile *bf, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
+	return R_NOTNULL;
 }
 
-static int destroy(RBinFile *arch) {
-	return R_TRUE;
+static bool load(RBinFile *bf) {
+	return true;
 }
 
-static ut64 baddr(RBinFile *arch) {
+static int destroy(RBinFile *bf) {
+	return true;
+}
+
+static ut64 baddr(RBinFile *bf) {
 	return 0;
 }
 
-static RList *strings(RBinFile *arch) {
+static RList *strings(RBinFile *bf) {
 	return NULL;
 }
 
-static RBinInfo* info(RBinFile *arch) {
+static RBinInfo *info(RBinFile *bf) {
 	RBinInfo *ret = NULL;
-	if (!(ret = R_NEW (RBinInfo)))
+	if (!(ret = R_NEW0 (RBinInfo))) {
 		return NULL;
-	memset (ret, '\0', sizeof (RBinInfo));
+	}
 	ret->lang = NULL;
-	strncpy (ret->file, arch->file, R_BIN_SIZEOF_STRINGS-1);
-	strncpy (ret->rpath, "NONE", R_BIN_SIZEOF_STRINGS-1);
-	strncpy (ret->type, "brainfuck", sizeof (ret->type)-1); // asm.arch
-	strncpy (ret->bclass, "1.0", sizeof (ret->bclass)-1);
-	strncpy (ret->rclass, "program", sizeof (ret->rclass)-1); // file.type
-	strncpy (ret->os, "any", sizeof (ret->os)-1);
-	strncpy (ret->subsystem, "unknown", sizeof (ret->subsystem)-1);
-	strncpy (ret->machine, "brainfuck", sizeof (ret->machine)-1);
-	strcpy (ret->arch, "bf");
+	ret->file = bf->file? strdup (bf->file): NULL;
+	ret->type = strdup ("brainfuck");
+	ret->bclass = strdup ("1.0");
+	ret->rclass = strdup ("program");
+	ret->os = strdup ("any");
+	ret->subsystem = strdup ("unknown");
+	ret->machine = strdup ("brainfuck");
+	ret->arch = strdup ("bf");
 	ret->has_va = 1;
-	ret->bits = 16;
+	ret->bits = 32; // 16?
 	ret->big_endian = 0;
 	ret->dbg_info = 0;
+	/* TODO: move this somewhere else */
+	eprintf ("f input 128 0x3000\n");
+	eprintf ("o malloc://128 0x3000\n");
+	eprintf ("f screen 80*25 0x4000\n");
+	eprintf ("o malloc://80*25 0x4000\n");
+	eprintf ("f stack 0x200 0x5000\n");
+	eprintf ("o malloc://0x200 0x5000\n");
+	eprintf ("f data 0x1000 0x6000\n");
+	eprintf ("o malloc://0x1000 0x6000\n");
+	eprintf ("ar\n"); // hack to init
+	eprintf ("ar brk=stack\n");
+	eprintf ("ar scr=screen\n");
+	eprintf ("ar kbd=input\n");
+	eprintf ("ar ptr=data\n");
+	eprintf ("\"e cmd.vprompt=pxa 32@stack;pxa 32@screen;pxa 32@data\"\n");
+	eprintf ("s 0\n");
+	eprintf ("e asm.bits=32\n");
+	eprintf ("dL bf\n");
 	return ret;
 }
 
-static int check(RBinFile *arch) {
+static bool check_bytes(const ut8 *buf, ut64 length) {
 	int i, is_bf = 0;
-	if (arch->buf) {
-		int max = R_MIN (16, arch->buf->length);
-		const char *p = (const char *)arch->buf->buf;
+	if (buf && length > 0) {
+		int max = R_MIN (16, length);
+		const char *p = (const char *) buf;
 		is_bf = 1;
-		for (i=0; i<max; i++) {
+		for (i = 0; i < max; i++) {
 			switch (p[i]) {
 			case '+':
 			case '-':
@@ -75,50 +92,39 @@ static int check(RBinFile *arch) {
 	return is_bf;
 }
 
-static RList* entries(RBinFile *arch) {
+static RList *entries(RBinFile *bf) {
 	RList *ret;
 	RBinAddr *ptr = NULL;
 
-	if (!(ret = r_list_new ()))
+	if (!(ret = r_list_newf (free))) {
 		return NULL;
-	ret->free = free;
-	if (!(ptr = R_NEW (RBinAddr)))
+	}
+	if (!(ptr = R_NEW0 (RBinAddr))) {
 		return ret;
-	memset (ptr, '\0', sizeof (RBinAddr));
-	ptr->offset = ptr->rva = 0;
+	}
+	ptr->paddr = ptr->vaddr = 0;
 	r_list_append (ret, ptr);
 	return ret;
 }
 
-struct r_bin_plugin_t r_bin_plugin_bf = {
+RBinPlugin r_bin_plugin_bf = {
 	.name = "bf",
 	.desc = "brainfuck",
 	.license = "LGPL3",
-	.init = NULL,
-	.fini = NULL,
 	.load = &load,
+	.load_bytes = &load_bytes,
 	.destroy = &destroy,
-	.check = &check,
+	.check_bytes = &check_bytes,
 	.baddr = &baddr,
-	.boffset = NULL,
-	.binsym = NULL,
 	.entries = entries,
-	.sections = NULL,
-	.symbols = NULL,
-	.imports = NULL,
 	.strings = &strings,
 	.info = &info,
-	.fields = NULL,
-	.libs = NULL,
-	.relocs = NULL,
-	.meta = NULL,
-	.write = NULL,
-	.demangle_type = NULL
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
-	.data = &r_bin_plugin_bf
+	.data = &r_bin_plugin_bf,
+	.version = R2_VERSION
 };
 #endif

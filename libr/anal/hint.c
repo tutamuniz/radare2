@@ -1,114 +1,230 @@
-/* radare - LGPL - Copyright 2013 - pancake */
+/* radare - LGPL - Copyright 2013-2016 - pancake */
 
 #include <r_anal.h>
 
-R_API void r_anal_hint_clear (RAnal *a) {
-	// XXX: memory leak!
-	r_list_free (a->hints);
-	a->hints = r_list_new ();
+#define DB a->sdb_hints
+#define setf(x,...) snprintf(x,sizeof(x)-1,##__VA_ARGS__)
+
+R_API void r_anal_hint_clear(RAnal *a) {
+	sdb_reset (a->sdb_hints);
 }
 
-R_API void r_anal_hint_del (RAnal *a, ut64 addr, int size) {
-	RAnalHint *hint = r_anal_hint_at (a, addr, size);
-	if (hint) r_list_delete_data (a->hints, hint);
+R_API void r_anal_hint_del(RAnal *a, ut64 addr, int size) {
+	char key[128];
+	if (size > 1) {
+		eprintf ("TODO: r_anal_hint_del: in range\n");
+	} else {
+		setf (key, "hint.0x%08"PFMT64x, addr);
+		sdb_unset (a->sdb_hints, key, 0);
+		a->bits_hints_changed = true;
+	}
 }
 
-R_API void r_anal_hint_set_jump (RAnal *a, ut64 addr, ut64 ptr) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, 0);
-	hint->jump = ptr;
+static void unsetHint(RAnal *a, const char *type, ut64 addr) {
+	int idx;
+	char key[128];
+	setf (key, "hint.0x%08"PFMT64x, addr);
+	idx = sdb_array_indexof (DB, key, type, 0);
+	if (idx != -1) {
+		sdb_array_delete (DB, key, idx, 0);
+		sdb_array_delete (DB, key, idx, 0);
+	}
 }
+
+static void setHint(RAnal *a, const char *type, ut64 addr, const char *s, ut64 ptr) {
+	int idx;
+	char key[128], val[128], *nval = NULL;
+	setf (key, "hint.0x%08"PFMT64x, addr);
+	idx = sdb_array_indexof (DB, key, type, 0);
+	if (s) {
+		nval = sdb_encode ((const ut8*)s, -1);
+	} else {
+		nval = sdb_itoa (ptr, val, 16);
+	}
+	if (idx != -1) {
+		if (!s) {
+			nval = sdb_itoa (ptr, val, 16);
+		}
+		sdb_array_set (DB, key, idx + 1, nval, 0);
+	} else {
+		sdb_array_push (DB, key, nval, 0);
+		sdb_array_push (DB, key, type, 0);
+	}
+	if (s) {
+		free (nval);
+	}
+}
+
+R_API void r_anal_hint_set_offset(RAnal *a, ut64 addr, const char* typeoff) {
+	setHint (a, "Offset:", addr, r_str_trim_ro (typeoff), 0);
+}
+
+R_API void r_anal_hint_set_jump(RAnal *a, ut64 addr, ut64 ptr) {
+	setHint (a, "jump:", addr, NULL, ptr);
+}
+
+R_API void r_anal_hint_set_newbits(RAnal *a, ut64 addr, int bits) {
+	a->bits_hints_changed = true;
+	setHint (a, "Bits:", addr, NULL, bits);
+}
+
+// TOOD: add helpers for newendian and newbank
 
 R_API void r_anal_hint_set_fail(RAnal *a, ut64 addr, ut64 ptr) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, 0);
-	hint->fail = ptr;
+	setHint (a, "fail:", addr, NULL, ptr);
 }
 
-R_API void r_anal_hint_set_pointer (RAnal *a, ut64 addr, ut64 ptr) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, 0);
-	hint->ptr = ptr;
+R_API void r_anal_hint_set_high(RAnal *a, ut64 addr) {
+	setHint (a, "high:", addr, NULL, 1);
 }
 
-R_API void r_anal_hint_set_arch (RAnal *a, ut64 addr, int size, const char *arch) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, size);
-	free (hint->arch);
-	arch = r_str_trim_head (arch);
-	hint->arch = strdup (arch);
-}
-
-R_API void r_anal_hint_set_opcode (RAnal *a, ut64 addr, int size, const char *opcode) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, size);
-	free (hint->opcode);
-	opcode = r_str_trim_head (opcode);
-	hint->opcode = strdup (opcode);
-}
-
-R_API void r_anal_hint_set_esil (RAnal *a, ut64 addr, int size, const char *analstr) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, size);
-	free (hint->analstr);
-	analstr = r_str_trim_head (analstr);
-	hint->analstr = strdup (analstr);
-}
-
-R_API void r_anal_hint_set_bits (RAnal *a, ut64 addr, int size, int bits) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, size);
-	hint->bits = bits;
-}
-
-R_API void r_anal_hint_set_length (RAnal *a, ut64 addr, int size, int length) {
-	RAnalHint *hint = r_anal_hint_add (a, addr, size);
-	hint->size = length;
-}
-
-R_API RAnalHint *r_anal_hint_at (RAnal *a, ut64 from, int size) {
-	ut64 to = from+size;
-	RAnalHint *hint;
-	RListIter *iter;
-	r_list_foreach (a->hints, iter, hint) {
-		if (from == hint->from && (!size || (to == hint->to)))
-			return hint;
+R_API void r_anal_hint_set_immbase(RAnal *a, ut64 addr, int base) {
+	if (base) {
+		setHint (a, "immbase:", addr, NULL, (ut64)base);
+	} else {
+		unsetHint (a, "immbase:", addr);
 	}
-	return NULL;
 }
 
-R_API RAnalHint *r_anal_hint_add (RAnal *a, ut64 from, int size) {
-	RAnalHint *hint = r_anal_hint_at (a, from, size);
+R_API void r_anal_hint_set_pointer(RAnal *a, ut64 addr, ut64 ptr) {
+	setHint (a, "ptr:", addr, NULL, ptr);
+}
+
+R_API void r_anal_hint_set_arch(RAnal *a, ut64 addr, const char *arch) {
+	setHint (a, "arch:", addr, r_str_trim_ro (arch), 0);
+}
+
+R_API void r_anal_hint_set_syntax(RAnal *a, ut64 addr, const char *syn) {
+	setHint (a, "Syntax:", addr, syn, 0);
+}
+
+R_API void r_anal_hint_set_opcode(RAnal *a, ut64 addr, const char *opcode) {
+	setHint (a, "opcode:", addr, r_str_trim_ro (opcode), 0);
+}
+
+R_API void r_anal_hint_set_esil(RAnal *a, ut64 addr, const char *esil) {
+	setHint (a, "esil:", addr, r_str_trim_ro (esil), 0);
+}
+
+R_API void r_anal_hint_set_bits(RAnal *a, ut64 addr, int bits) {
+	a->bits_hints_changed = true;
+	setHint (a, "bits:", addr, NULL, bits);
+}
+
+R_API void r_anal_hint_set_size(RAnal *a, ut64 addr, int size) {
+	setHint (a, "size:", addr, NULL, size);
+}
+
+R_API void r_anal_hint_unset_size(RAnal *a, ut64 addr) {
+	unsetHint(a, "size:", addr);
+}
+
+R_API void r_anal_hint_unset_bits(RAnal *a, ut64 addr) {
+	a->bits_hints_changed = true;
+	unsetHint(a, "bits:", addr);
+}
+
+R_API void r_anal_hint_unset_esil(RAnal *a, ut64 addr) {
+	unsetHint(a, "esil:", addr);
+}
+
+R_API void r_anal_hint_unset_opcode(RAnal *a, ut64 addr) {
+	unsetHint(a, "opcode:", addr);
+}
+
+R_API void r_anal_hint_unset_high(RAnal *a, ut64 addr) {
+	unsetHint(a, "high:", addr);
+}
+
+R_API void r_anal_hint_unset_arch(RAnal *a, ut64 addr) {
+	unsetHint(a, "arch:", addr);
+}
+
+R_API void r_anal_hint_unset_syntax(RAnal *a, ut64 addr) {
+	unsetHint(a, "Syntax:", addr);
+}
+
+R_API void r_anal_hint_unset_pointer(RAnal *a, ut64 addr) {
+	unsetHint(a, "ptr:", addr);
+}
+
+R_API void r_anal_hint_unset_offset(RAnal *a, ut64 addr) {
+	unsetHint (a, "Offset:", addr);
+}
+
+R_API void r_anal_hint_unset_jump(RAnal *a, ut64 addr) {
+	unsetHint (a, "jump:", addr);
+}
+
+R_API void r_anal_hint_unset_fail(RAnal *a, ut64 addr) {
+	unsetHint (a, "fail:", addr);
+}
+
+R_API void r_anal_hint_free(RAnalHint *h) {
+	if (h) {
+		free (h->arch);
+		free (h->esil);
+		free (h->opcode);
+		free (h->syntax);
+		free (h->offset);
+		free (h);
+	}
+}
+
+R_API RAnalHint *r_anal_hint_from_string(RAnal *a, ut64 addr, const char *str) {
+	char *r, *nxt, *nxt2;
+	int token = 0;
+	RAnalHint *hint = R_NEW0 (RAnalHint);
 	if (!hint) {
-		hint = R_NEW0 (RAnalHint);
-		hint->jump = UT64_MAX;
-		hint->fail = UT64_MAX;
-		hint->from = from;
-		r_list_append (a->hints, hint);
+		return NULL;
 	}
-// TODO reuse entries if from and size match
-	if (size<1) size = 1;
-	hint->to = from+size;
+	hint->jump = UT64_MAX;
+	hint->fail = UT64_MAX;
+	char *s = strdup (str);
+	if (!s) {
+		free (hint);
+		return NULL;
+	}
+	hint->addr = addr;
+	token = *s;
+	for (r = s; ; r = nxt2) {
+		r = sdb_anext (r, &nxt);
+		if (!nxt) {
+			break;
+		}
+		sdb_anext (nxt, &nxt2); // tokenize value
+		if (token) {
+			switch (token) {
+			case 'i': hint->immbase = sdb_atoi (nxt); break;
+			case 'j': hint->jump = sdb_atoi (nxt); break;
+			case 'f': hint->fail = sdb_atoi (nxt); break;
+			case 'p': hint->ptr  = sdb_atoi (nxt); break;
+			case 'b': hint->bits = sdb_atoi (nxt); break;
+			case 'B': hint->new_bits = sdb_atoi (nxt); break;
+			case 's': hint->size = sdb_atoi (nxt); break;
+			case 'S': hint->syntax = (char*)sdb_decode (nxt, 0); break;
+			case 'o': hint->opcode = (char*)sdb_decode (nxt, 0); break;
+			case 'O': hint->offset = (char*)sdb_decode (nxt, 0); break;
+			case 'e': hint->esil = (char*)sdb_decode (nxt, 0); break;
+			case 'a': hint->arch = (char*)sdb_decode (nxt, 0); break;
+			case 'h': hint->high = sdb_atoi (nxt); break;
+			}
+		}
+		if (!nxt || !nxt2) {
+			break;
+		}
+		token = *nxt2;
+	}
+	free (s);
 	return hint;
 }
 
-R_API void r_anal_hint_free (RAnalHint *h) {
-	free (h->arch);
-	free (h);
-}
-
-R_API RAnalHint *r_anal_hint_get(RAnal *anal, ut64 addr) {
-	RAnalHint *res = NULL;
-	RAnalHint *hint;
-	RListIter *iter;
-	r_list_foreach (anal->hints, iter, hint) {
-		if (addr >= hint->from && addr < hint->to) {
-			if (!res) res = R_NEW0 (RAnalHint);
-#define SETRETX(x) if(hint->x!=UT64_MAX) res->x=hint->x;
-#define SETRETS(x) if(hint->x) res->x=strdup(hint->x);
-#define SETRET(x) if(hint->x) res->x=hint->x
-			SETRETS(arch);
-			SETRET(bits);
-			SETRET(ptr);
-			SETRETX(jump);
-			SETRETX(fail);
-			SETRETS(opcode);
-			SETRETS(analstr);
-			SETRET(size);
-		}
+R_API RAnalHint *r_anal_hint_get(RAnal *a, ut64 addr) {
+	char key[64];
+	setf (key, "hint.0x%08"PFMT64x, addr);
+	const char *s = sdb_const_get (DB, key, 0);
+	if (!s) {
+		return NULL;
 	}
-	return res;
+	return r_anal_hint_from_string (a, addr, s);
 }

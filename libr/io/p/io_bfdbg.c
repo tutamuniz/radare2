@@ -36,7 +36,7 @@ static inline int is_in_base(ut64 off, BfvmCPU *c) {
 static int __write(RIO *io, RIODesc *fd, const ut8 *buf, int count) {
 	RIOBfdbg *riom;
 	int sz;
-	if (fd == NULL || fd->data == NULL)
+	if (!fd || !fd->data)
 		return -1;
 	riom = fd->data;
 	/* data base buffer */
@@ -76,7 +76,7 @@ static int __write(RIO *io, RIODesc *fd, const ut8 *buf, int count) {
 static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 	RIOBfdbg *riom;
 	int sz;
-	if (fd == NULL || fd->data == NULL)
+	if (!fd || !fd->data)
 		return -1;
 	riom = fd->data;
 	/* data base buffer */
@@ -115,7 +115,7 @@ static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 
 static int __close(RIODesc *fd) {
 	RIOBfdbg *riom;
-	if (fd == NULL || fd->data == NULL)
+	if (!fd || !fd->data)
 		return -1;
 	riom = fd->data;
 	bfvm_free (riom->bfvm);
@@ -123,7 +123,6 @@ static int __close(RIODesc *fd) {
 	riom->buf = NULL;
 	free (fd->data);
 	fd->data = NULL;
-	fd->state = R_IO_DESC_TYPE_CLOSED;
 	return 0;
 }
 
@@ -136,8 +135,8 @@ static ut64 __lseek(RIO *io, RIODesc *fd, ut64 offset, int whence) {
 	return offset;
 }
 
-static int __plugin_open(RIO *io, const char *pathname, ut8 many) {
-	return (!memcmp (pathname, "bfdbg://", 8));
+static bool __plugin_open(RIO *io, const char *pathname, bool many) {
+	return (!strncmp (pathname, "bfdbg://", 8));
 }
 
 static inline int getmalfd (RIOBfdbg *mal) {
@@ -149,22 +148,30 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 	int rlen;
 	if (__plugin_open (io, pathname, 0)) {
 		RIOBind iob;
-		RIOBfdbg *mal = R_NEW (RIOBfdbg);
+		RIOBfdbg *mal = R_NEW0 (RIOBfdbg);
+		if (!mal) return NULL;
 		r_io_bind (io, &iob);
 		mal->fd = getmalfd (mal);
 		mal->bfvm = bfvm_new (&iob);
-		out = r_file_slurp (pathname+8, &rlen);
-		if (!out || rlen<1)
+		if (!mal->bfvm) {
+			free (mal);
 			return NULL;
+		}
+		out = r_file_slurp (pathname+8, &rlen);
+		if (!out || rlen < 1) {
+			free (mal);
+			free (out);
+			return NULL;
+		}
 		mal->size = rlen;
 		mal->buf = malloc (mal->size+1);
 		if (mal->buf != NULL) {
 			memcpy (mal->buf, out, rlen);
 			free (out);
-			return r_io_desc_new (&r_io_plugin_bfdbg,
-				mal->fd, pathname, rw, mode, mal);
+			return r_io_desc_new (io, &r_io_plugin_bfdbg,
+				pathname, rw, mode, mal);
 		}
-		eprintf ("Cannot allocate (%s) %d bytes\n",
+		eprintf ("Cannot allocate (%s) %d byte(s)\n",
 			pathname+9, mal->size);
 		free (mal);
 		free (out);
@@ -174,19 +181,20 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 
 RIOPlugin r_io_plugin_bfdbg = {
 	.name = "bfdbg",
-        .desc = "BrainFuck Debugger (bfdbg://path/to/file)",
+	.desc = "BrainFuck Debugger (bfdbg://path/to/file)",
 	.license = "LGPL3",
-        .open = __open,
-        .close = __close,
+	.open = __open,
+	.close = __close,
 	.read = __read,
-        .plugin_open = __plugin_open,
+	.check = __plugin_open,
 	.lseek = __lseek,
 	.write = __write,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
-	.data = &r_io_plugin_bfdbg
+	.data = &r_io_plugin_bfdbg,
+	.version = R2_VERSION
 };
 #endif

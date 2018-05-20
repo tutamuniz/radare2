@@ -1,35 +1,70 @@
 include ../global.mk
+include ../libr/config.mk
+
+DESTDIR:=$(DESTDIR)
 BTOP=$(shell pwd)
 
-.PHONY: all clean install install-symlink deinstall uninstall mrproper
-
-PFX=${DESTDIR}/${PREFIX}
-BFX=${DESTDIR}/${BINDIR}
-LFX=${DESTDIR}/${LIBDIR}
+.PHONY: all clean install install-symlink deinstall uninstall mrproper preload
 
 BINS=rax2 rasm2 rabin2 rahash2 radiff2 radare2 rafind2 rarun2 ragg2 r2agent
 
-all:
-	@for a in ${BINS} ; do (cd $$a && ${MAKE} all) || exit 1; done
+LIBR2=$(call libname-version,libr2.$(EXT_SO),${LIBVERSION})
+
+all: preload
+	@for BINARY in $(BINS) ; do $(MAKE) -C $${BINARY} all; done
+ifeq ($(COMPILER),ios-sdk)
+	$(MAKE) ios-sign
+endif
+
+preload:
+ifeq ($(WITHPIC),1)
+	$(MAKE) -C preload
+endif
 
 install:
-	mkdir -p ${BFX}
-	for a in ${BINS} ; do ${INSTALL_PROGRAM} $$a/$$a ${BFX}/$$a ; done
-	${INSTALL_SCRIPT} ragg2/ragg2-cc ${BFX}/ragg2-cc
-	-cd ${BFX} && rm -f r2 ; ln -fs radare2 r2
+	mkdir -p "${DESTDIR}${BINDIR}"
+	for BINARY in ${BINS} ; do \
+		rm -f "${DESTDIR}${BINDIR}/$$BINARY" ; \
+		${INSTALL_PROGRAM} "$$BINARY/$$BINARY" "${DESTDIR}${BINDIR}/$$BINARY" ; \
+	done
+	${INSTALL_SCRIPT} "$(BTOP)/r2pm/r2pm" "${DESTDIR}${BINDIR}/r2pm"
+	rm -rf "${DESTDIR}${DATADIR}/radare2/${VERSION}/r2pm"
+	#mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/r2pm"
+	#cp -rf r2pm/d/* "${DESTDIR}${DATADIR}/radare2/${VERSION}/r2pm"
+	-cd "${DESTDIR}${BINDIR}" && rm -f r2 ; ln -fs radare2 r2
+ifeq ($(WITHPIC),1)
+	${INSTALL_LIB} "preload/libr2.$(EXT_SO)" "${DESTDIR}${LIBDIR}"
+	-cd "${DESTDIR}${LIBDIR}" && \
+		mv libr2.$(EXT_SO) $(LIBR2) && \
+		ln -fs $(LIBR2) libr2.$(EXT_SO)
+endif
+
+ios_sign ios-sign ios-sdk-sign:
+	for a in $(BINS) ; do xcrun --sdk iphoneos codesign -s- --entitlements radare2/radare2.xml $$a ; done
 
 symstall install-symlink:
-	mkdir -p ${BFX}
-	for a in ${BINS} ; do ln -fs ${BTOP}/$$a/$$a ${BFX}/$$a ; done
-	ln -fs ${BTOP}/ragg2/ragg2-cc ${BFX}/ragg2-cc
-	-ln -fs ${PFX}/bin/radare2 ${BFX}/r2
+	cd .. && \
+	mkdir -p "${DESTDIR}${BINDIR}" && \
+	for BINARY in ${BINS} ; do ln -fs "${BTOP}/$$BINARY/$$BINARY" "${DESTDIR}${BINDIR}/$$BINARY" ; done
+	cd .. && ln -fs "${BTOP}/r2pm/r2pm" "${DESTDIR}${BINDIR}/r2pm"
+	cd .. && rm -rf "${DESTDIR}${DATADIR}/radare2/${VERSION}/r2pm"
+	cd .. && mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/"
+	#ln -fs "$(BTOP)/r2pm/d" "${DESTDIR}${DATADIR}/radare2/${VERSION}/r2pm"
+	-cd .. && ln -fs "${DESTDIR}${BINDIR}/radare2" "${DESTDIR}${BINDIR}/r2"
+	-cd .. && ln -fs "${BTOP}/preload/libr2.$(EXT_SO)" "${DESTDIR}${LIBDIR}/libr2.$(EXT_SO)"
+	-cd .. && cd "${DESTDIR}${LIBDIR}" && \
+		mv libr2.$(EXT_SO) $(LIBR2) && \
+		ln -fs $(LIBR2) libr2.$(EXT_SO)
 
 deinstall uninstall:
-	for a in ${BINS} ; do rm -f ${BFX}/$$a ; done
-	-rm -f ${BFX}/r2
+	-cd .. ; \
+	for BINARY in ${BINS} ; do rm -f "${DESTDIR}${BINDIR}/$$BINARY" ; done ; \
+	rm -f "${DESTDIR}${BINDIR}/r2pm" ; \
+	rm -f "${DESTDIR}${BINDIR}/r2"
 
 clean:
-	@for a in ${BINS} ; do (cd $$a && ${MAKE} clean); done
+	@for DIR in preload ${BINS} ; do ${MAKE} -C $$DIR clean; done
 
 mrproper:
-	@for a in ${BINS} ; do (cd $$a && ${MAKE} mrproper); done
+	@for DIR in preload ${BINS} ; do ${MAKE} -C $$DIR mrproper; done
+

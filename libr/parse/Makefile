@@ -1,12 +1,19 @@
-NAME=r_parse
-DEPS=r_flags r_util r_anal
-
 include ../config.mk
-LINK=$(STOP)/tcc/libr_tcc.a
+
+NAME=r_parse
+DEPS=r_flag r_util r_syscall r_reg
+# indirect dependencies
+DEPS+=r_cons
+
+LINK+=$(STOP)/tcc/libr_tcc.a
 CFLAGS+=-I$(STOP)/tcc/
 
+include $(SHLR)/zip/deps.mk
+
 foo:
-	@for a in pre libr_parse.${EXT_SO} libr_parse.${EXT_AR} plugins bins ; do ${MAKE} $$a ; done
+	@for TARGET in pre libr_parse.${EXT_SO} \
+	libr_parse.${EXT_AR} plugins bins ; do \
+	    ${MAKE} $$TARGET ; done
 
 CFLAGS+=-DCORELIB
 -include ${STATIC_PARSE_PLUGINS}
@@ -27,4 +34,4 @@ endif
 plugins:
 	@cd p && ${MAKE} all
 
-include $(LTOP)/rules.mk
+include ../rules.mk

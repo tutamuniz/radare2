@@ -39,9 +39,9 @@ grub_fs_t grub_fs_list;
 grub_fs_autoload_hook_t grub_fs_autoload_hook = 0;
 
 static int
-dummy_func (const char *filename __attribute__ ((unused)),
-	    const struct grub_dirhook_info *info  __attribute__ ((unused)),
-	    void *closure __attribute__ ((unused)))
+dummy_func (const char *filename ,
+	    const struct grub_dirhook_info *info  ,
+	    void *closure )
 {
   return 1;
 }
@@ -224,7 +224,7 @@ grub_fs_blocklist_rw (int write, grub_file_t file, char *buf, grub_size_t len)
 	  if (offset + size > p->length)
 	    size = p->length - offset;
 
-	  if ((write) ?
+	  if (buf && (write) ?
 	       grub_disk_write (file->device->disk, 0, p->offset + offset,
 				size, buf) :
 	       grub_disk_read_ex (file->device->disk, 0, p->offset + offset,

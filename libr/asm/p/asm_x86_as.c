@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2013 pancake */
+/* radare - LGPL - Copyright 2011-2015 pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -17,9 +17,21 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 	int len = 0;
 
 	ifd = r_file_mkstemp ("r_as", &ipath);
-	ofd = r_file_mkstemp ("r_as", &opath);
+	if (ifd == -1)
+		return -1;
 
-	syntaxstr = ".intel_syntax noprefix\n"; // if intel syntax
+	ofd = r_file_mkstemp ("r_as", &opath);
+	if (ofd == -1) {
+		free (ipath);
+		return -1;
+	}
+
+	if (a->syntax == R_ASM_SYNTAX_INTEL)
+		syntaxstr = ".intel_syntax noprefix\n";
+
+	if (a->syntax == R_ASM_SYNTAX_ATT)
+		syntaxstr = ".att_syntax\n";
+
 	len = snprintf (asm_buf, sizeof (asm_buf),
 			"%s.code%i\n" //.org 0x%"PFMT64x"\n"
 			".ascii \"BEGINMARK\"\n"
@@ -34,6 +46,11 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 		const ut8 *begin, *end;
 		close (ofd);
 		ofd = open (opath, O_BINARY|O_RDONLY);
+		if (ofd < 0) {
+			free (ipath);
+			free (opath);
+			return -1;
+		}
 		len = read (ofd, op->buf, R_ASM_BUFSIZE);
 		begin = r_mem_mem (op->buf, len, (const ut8*)"BEGINMARK", 9);
 		end = r_mem_mem (op->buf, len, (const ut8*)"ENDMARK", 7);
@@ -63,20 +80,19 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 
 RAsmPlugin r_asm_plugin_x86_as = {
 	.name = "x86.as",
-	.desc = "X86 assembler plugin using 'as' program",
+	.desc = "Intel X86 GNU Assembler",
 	.arch = "x86",
 	.license = "LGPL3",
 	// NOTE: 64bits is not supported on OSX's nasm :(
 	.bits = 16|32|64,
-	.init = NULL,
-	.fini = NULL,
-	.disassemble = NULL,
+	.endian = R_SYS_ENDIAN_LITTLE,
 	.assemble = &assemble,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_x86_as
+	.data = &r_asm_plugin_x86_as,
+	.version = R2_VERSION
 };
 #endif

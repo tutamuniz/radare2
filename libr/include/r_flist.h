@@ -1,7 +1,7 @@
 /* radare - LGPL - Copyright 2010 nibble <.ds@gmail.com> */
 
-#ifndef _INCLUDE_R_FLIST_H_
-#define _INCLUDE_R_FLIST_H_
+#ifndef R2_FLIST_H
+#define R2_FLIST_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,8 +37,10 @@ static inline void **r_flist_init(void **it, int n) {
 
 static inline void **r_flist_new(int n) {
 	void **it;
-	if (!(it = (void **)malloc ((n+2) * sizeof (void*))))
+	if (((n + 2) * sizeof(void*)) < sizeof(void*)) return NULL;
+	if (!(it = (void **)calloc ((n + 2), sizeof (void*)))) {
 		return NULL;
+	}
 	return r_flist_init (it, n);
 }
 

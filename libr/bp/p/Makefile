@@ -1,17 +1,15 @@
 include ../../config.mk
+include ../../../mk/platform.mk
+
 ifeq ($(WITHPIC),1)
+CFLAGS+=-I../../include -I../arch/ -I../arch/include -Wall ${PIC_CFLAGS} ${LDFLAGS_LIB}
+CFLAGS+=-D__UNIX__
 
-CFLAGS=-I../../include -I../arch/ -I../arch/include -Wall -fPIC ${LDFLAGS_LIB}
-CFLAGS+=-DLIL_ENDIAN=1 -D__UNIX__
-
-foo: all
+all: ${ALL_TARGETS}
 
 ALL_TARGETS=
 ARCHS=x86.mk arm.mk
 include $(ARCHS)
-
-all: ${ALL_TARGETS}
-	@true
 
 clean:
 	-rm -f *.so *.o ${STATIC_OBJ}
@@ -19,7 +17,9 @@ clean:
 mrproper: clean
 	-rm -f *.d
 
-.PHONY: all clean foo mrproper
+.PHONY: all clean mrproper
 else
-all:
+all clean mrproper:
+
+.PHONY: all clean mrproper
 endif

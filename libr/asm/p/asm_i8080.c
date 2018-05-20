@@ -16,19 +16,18 @@ static int do_disassemble(RAsm *a, struct r_asm_op_t *op, const ut8 *buf, int le
 
 RAsmPlugin r_asm_plugin_i8080 = {
 	.name = "i8080",
-	.desc = "i8080 disassembler plugin",
+	.desc = "Intel 8080 CPU",
 	.arch = "i8080",
 	.license = "BSD",
 	.bits = 8,
-	.init = NULL,
-	.fini = NULL,
-	.disassemble = do_disassemble,
-	.assemble = NULL,
+	.endian = R_SYS_ENDIAN_NONE,
+	.disassemble = &do_disassemble
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_i8080
+	.data = &r_asm_plugin_i8080,
+	.version = R2_VERSION
 };
 #endif

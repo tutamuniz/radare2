@@ -1,22 +1,21 @@
-#ifndef _INCLUDE_R_CMD_H_
-#define _INCLUDE_R_CMD_H_
+#ifndef R2_CMD_H
+#define R2_CMD_H
 
 #include <r_types.h>
 #include <r_util.h>
-#include "list.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-R_LIB_VERSION_HEADER(r_cmd);
+//R_LIB_VERSION_HEADER (r_cmd);
 
 #define MACRO_LIMIT 1024
 #define MACRO_LABELS 20
 #define R_CMD_MAXLEN 4096
 
 #define r_cmd_callback(x) int (*x)(void *data, const char *input)
-#define r_cmd_nullcallback(x) int (*x)(void *data);
+#define r_cmd_nullcallback(x) int (*x)(void *data)
 
 typedef struct r_cmd_macro_label_t {
 	char name[80];
@@ -37,7 +36,7 @@ typedef struct r_cmd_macro_t {
 	ut64 _brk_value;
 	int brk;
 	int (*cmd)(void *user, const char *cmd);
-	PrintfCallback printf;
+	PrintfCallback cb_printf;
 	void *user;
 	RNum *num;
 	int labels_n;
@@ -64,6 +63,7 @@ typedef struct r_cmd_alias_t {
 	int count;
 	char **keys;
 	char **values;
+	int *remote;
 } RCmdAlias;
 
 typedef struct r_cmd_t {
@@ -76,43 +76,58 @@ typedef struct r_cmd_t {
 	RCmdAlias aliases;
 } RCmd;
 
-typedef struct r_cmd_plugin_t {
-	char *name;
-	char *desc;
+// TODO WIP
+typedef struct r_cmd_descriptor_t {
+	const char *cmd;
+	const char **help_msg;
+	const char **help_detail;
+	const char **help_detail2;
+	struct r_cmd_descriptor_t *sub[127];
+} RCmdDescriptor;
+
+typedef struct r_core_plugin_t {
+	const char *name;
+	const char *desc;
+	const char *license;
+	const char *author;
+	const char *version;
 	RCmdCallback call;
-} RCmdPlugin;
+	RCmdCallback init;
+	RCmdCallback deinit;
+} RCorePlugin;
 
 #ifdef R_API
-R_API RCmd *r_cmd_new();
+R_API int r_core_plugin_init(RCmd *cmd);
+R_API int r_core_plugin_add(RCmd *cmd, RCorePlugin *plugin);
+R_API int r_core_plugin_check(RCmd *cmd, const char *a0);
+R_API int r_core_plugin_deinit(RCmd *cmd);
+
+/* review api */
+R_API RCmd *r_cmd_new(void);
 R_API RCmd *r_cmd_free(RCmd *cmd);
 R_API int r_cmd_set_data(RCmd *cmd, void *data);
 R_API int r_cmd_add(RCmd *cmd, const char *command, const char *desc, r_cmd_callback(callback));
 R_API int r_cmd_add_long(RCmd *cmd, const char *longcmd, const char *shortcmd, const char *desc);
-R_API int r_cmd_del(RCmd *cmd, const char *command);
+R_API int r_core_del(RCmd *cmd, const char *command);
 R_API int r_cmd_call(RCmd *cmd, const char *command);
 R_API int r_cmd_call_long(RCmd *cmd, const char *input);
 R_API char **r_cmd_args(RCmd *cmd, int *argc);
-
-R_API int r_cmd_plugin_init(RCmd *cmd);
-R_API int r_cmd_plugin_add(RCmd *cmd, RCmdPlugin *plugin);
-R_API int r_cmd_plugin_check(RCmd *cmd, const char *a0);
-
-/* plugins */
-extern struct r_cmd_plugin_t r_cmd_plugin_dummy;
 
 /* r_cmd_macro */
 R_API void r_cmd_macro_init(RCmdMacro *mac);
 R_API int r_cmd_macro_add(RCmdMacro *mac, const char *name);
 R_API int r_cmd_macro_rm(RCmdMacro *mac, const char *_name);
 R_API void r_cmd_macro_list(RCmdMacro *mac);
+R_API void r_cmd_macro_meta(RCmdMacro *mac);
 R_API int r_cmd_macro_call(RCmdMacro *mac, const char *name);
 R_API int r_cmd_macro_break(RCmdMacro *mac, const char *value);
 
 R_API int r_cmd_alias_del (RCmd *cmd, const char *k);
 R_API char **r_cmd_alias_keys(RCmd *cmd, int *sz);
-R_API int r_cmd_alias_set (RCmd *cmd, const char *k, const char *v);
-R_API char *r_cmd_alias_get (RCmd *cmd, const char *k);
+R_API int r_cmd_alias_set (RCmd *cmd, const char *k, const char *v, int remote);
+R_API char *r_cmd_alias_get (RCmd *cmd, const char *k, int remote);
 R_API void r_cmd_alias_free (RCmd *cmd);
+R_API void r_cmd_macro_free (RCmdMacro *mac);
 
 #ifdef __cplusplus
 }

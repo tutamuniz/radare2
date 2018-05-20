@@ -1,7 +1,9 @@
 /* radare - LGPL - Copyright 2006-2009 pancake<nopcode.org> */
 
 #include "r_search.h"
-
+#if _MSC_VER
+#define strncasecmp strnicmp
+#endif
 // TODO: this file needs some love
 enum {
 	ENCODING_ASCII = 0,
@@ -14,14 +16,20 @@ static char *encodings[3] = { "ascii", "cp850", NULL };
 
 R_API int r_search_get_encoding(const char *name) {
 	int i;
-	if (name != NULL)
-		for (i=0;encodings[i];i++)
-			if (!strcasecmp (name, encodings[i]))
-				return i;
+	if (!name || !*name) {
+		return ENCODING_ASCII;
+	}
+	ut32 lename = strlen (name);
+	for (i = 0; encodings[i]; i++) {
+		ut32 sz = R_MIN (strlen (encodings[i]), lename);
+		if (!strncasecmp (name, encodings[i], sz)) {
+			return i; 
+		}
+	}
 	return ENCODING_ASCII;
 }
 
-static int is_encoded(int encoding, unsigned char c) {
+static bool is_encoded(int encoding, unsigned char c) {
 	switch (encoding) {
 	case ENCODING_ASCII:
 		break;
@@ -45,16 +53,14 @@ static int is_encoded(int encoding, unsigned char c) {
 		case 214: // I acute
 		case 224: // O acute
 		case 233: // U acute
-			return 1;
+			return true;
 		}
 		break;
 	}
-	return 0;
+	return false;
 }
 
-R_API int r_search_strings_update(void *_s, ut64 from, const ut8 *buf, int len) {
-	RSearch *s = (RSearch *)_s;
-	const int enc = 0; // hardcoded
+R_API int r_search_strings_update(RSearch *s, ut64 from, const ut8 *buf, int len) {
 	int i = 0;
 	int widechar = 0;
 	int matches = 0;
@@ -65,13 +71,14 @@ R_API int r_search_strings_update(void *_s, ut64 from, const ut8 *buf, int len) 
 	r_list_foreach (s->kws, iter, kw) {
 	for (i=0; i<len; i++) {
 		char ch = buf[i];
-		if (IS_PRINTABLE(ch) || IS_WHITESPACE(ch) || is_encoded (enc, ch)) {
+		// non-cp850 encoded
+		if (IS_PRINTABLE(ch) || IS_WHITESPACE(ch) || is_encoded (0, ch)) {
 			str[matches] = ch;
 			if (matches < sizeof(str))
 				matches++;
 		} else {
 			/* wide char check \x??\x00\x??\x00 */
-			if (matches && buf[i+2]=='\0' && buf[i]=='\0' && buf[i+1]!='\0') {
+			if (matches && i + 2 < len && buf[i+2]=='\0' && buf[i]=='\0' && buf[i+1]!='\0') {
 				widechar = 1;
 				return 1; // widechar
 			}
@@ -80,7 +87,6 @@ R_API int r_search_strings_update(void *_s, ut64 from, const ut8 *buf, int len) 
 				str[matches] = '\0';
 				int len = strlen(str);
 				if (len>2) {
-					kw->count++;
 					if (widechar) {
 						ut64 off = (ut64)from+i-(len*2)+1;
 						r_search_hit_new (s, kw, off);

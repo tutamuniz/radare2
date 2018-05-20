@@ -1,10 +1,11 @@
-/* radare - LGPL - Copyright 2014 - pancake */
+/* radare - LGPL - Copyright 2014-2016 - pancake */
 
 #include <r_debug.h>
 
-#define DB dbg->signals
+#define DB dbg->sgnls
 
 // TODO: this must be done by the debugger plugin
+// which is stored already in SDB.. but this is faster :P
 static struct {
 	const char *k;
 	const char *v;
@@ -16,7 +17,7 @@ static struct {
 	{ "SIGILL", "4" },
 	{ "SIGTRAP", "5" },
 	{ "SIGABRT", "6" },
-	{ "SIGIOT", "6" },
+	// { "SIGIOT", "6" },
 	{ "SIGBUS", "7" },
 	{ "SIGFPE", "8" },
 	{ "SIGKILL", "9" },
@@ -46,7 +47,6 @@ static struct {
 	{ "SIGSYS", "31" },
 	{ "SIGRTMIN", "32" },
 	{ "SIGRTMAX", "NSIG" },
-	{ "SIGSTKSZ", "8192" },
 	{ NULL }
 };
 
@@ -61,12 +61,12 @@ R_API void r_debug_signal_init(RDebug *dbg) {
 }
 
 static int siglistcb (void *p, const char *k, const char *v) {
-	int opt;
-	RDebug *dbg = (RDebug *)p;
 	static char key[32] = "cfg.";
-	if (atoi (k)>0) {
-		strcpy (key+4, k);
-		opt = sdb_getn (DB, key, 0);
+	RDebug *dbg = (RDebug *)p;
+	int opt, mode = dbg->_mode;
+	if (atoi (k) > 0) {
+		strncpy (key + 4, k, 20);
+		opt = sdb_num_get (DB, key, 0);
 		if (opt) {
 			r_cons_printf ("%s %s", k, v);
 			if (opt & R_DBG_SIGNAL_CONT)
@@ -74,33 +74,55 @@ static int siglistcb (void *p, const char *k, const char *v) {
 			if (opt & R_DBG_SIGNAL_SKIP)
 				r_cons_strcat (" skip");
 			r_cons_newline ();
-		} else r_cons_printf ("%s %s\n", k, v);
+		} else {
+			if (mode == 0) {
+				r_cons_printf ("%s %s\n", k, v);
+			}
+		}
 	}
-	return 0;
+	return 1;
 }
 
-R_API void r_debug_signal_list(RDebug *dbg) {
-	sdb_foreach (DB, siglistcb, dbg);
+static int siglistjsoncb (void *p, const char *k, const char *v) {
+	static char key[32] = "cfg.";
+	RDebug *dbg = (RDebug *)p;
+	int opt;
+	if (atoi (k)>0) {
+		strncpy (key + 4, k, 20);
+		opt = (int)sdb_num_get (DB, key, 0);
+		if (dbg->_mode == 2) {
+			dbg->_mode = 0;
+		} else {
+			r_cons_strcat (",");
+		}
+		r_cons_printf ("{\"signum\":\"%s\",\"name\":\"%s\",\"option\":", k, v);
+		if (opt & R_DBG_SIGNAL_CONT) {
+			r_cons_strcat ("\"cont\"");
+		} else if (opt & R_DBG_SIGNAL_SKIP) {
+			r_cons_strcat ("\"skip\"");
+		} else {
+			r_cons_strcat ("null");
+		}
+		r_cons_strcat ("}");
+	}
+	return true;
 }
 
-R_API int r_debug_signal_resolve(RDebug *dbg, const char *signame) {
-	int ret;
-	char *name;
-	if (strchr (signame, '.'))
-		return 0;
-	name = strdup (signame);
-	r_str_case (name, R_TRUE);
-	if (strncmp (name, "SIG", 3))
-		name = r_str_prefix (name, "SIG");
-	ret = (int)sdb_getn (DB, name, 0);
-	free (name);
-	return ret;
-}
-
-R_API const char *r_debug_signal_resolve_i(RDebug *dbg, int signum) {
-	char k[32];
-	snprintf (k, sizeof (k), "%d", signum);
-	return sdb_getc (DB, k, 0);
+R_API void r_debug_signal_list(RDebug *dbg, int mode) {
+	dbg->_mode = mode;
+	switch (mode) {
+	case 0:
+	case 1:
+		sdb_foreach (DB, siglistcb, dbg);
+		break;
+	case 2:
+		r_cons_strcat ("[");
+		sdb_foreach (DB, siglistjsoncb, dbg);
+		r_cons_strcat ("]");
+		r_cons_newline();
+		break;
+	}
+	dbg->_mode = 0;
 }
 
 R_API int r_debug_signal_send(RDebug *dbg, int num) {
@@ -114,7 +136,7 @@ R_API void r_debug_signal_setup(RDebug *dbg, int num, int opt) {
 R_API int r_debug_signal_what(RDebug *dbg, int num) {
 	char k[32];
 	snprintf (k, sizeof (k), "cfg.%d", num);
-	return sdb_getn (DB, k, 0);
+	return sdb_num_get (DB, k, 0);
 }
 
 R_API int r_debug_signal_set(RDebug *dbg, int num, ut64 addr) {
@@ -138,6 +160,5 @@ R_API int r_debug_kill_setup(RDebug *dbg, int sig, int action) {
 		return dbg->h->kill_setup (dbg, sig, action);
 #endif
 	// TODO: implement r_debug_kill_setup
-	return R_FALSE;
+	return false;
 }
-

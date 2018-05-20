@@ -5,7 +5,8 @@ endif
 
 # OSX 10.7 (lion)
 ifeq (${OSTYPE},darwin)
-LDFLAGS+=-lcrypto
+#LDFLAGS+=-lcrypto
+# IOS doesnt allows to link against libcrypto
 endif
 # on solaris only
 ifeq (${OSTYPE},solaris)
@@ -18,4 +19,14 @@ endif
 ifeq (${OSTYPE},windows)
 LDFLAGS+=-lwsock32
 #LDFLAGS+=-lws2_32
+endif
+
+ifneq (,$(findstring mingw32,$(OSTYPE))$(findstring mingw64,$(OSTYPE)))
+LDFLAGS+=-lws2_32
+else
+# no libutil for android
+#ifneq (,$(findstring linux,$(OSTYPE))$(findstring android,$(OSTYPE))$(findstring bsd,$(OSTYPE)))
+ifneq (,$(findstring linux,$(OSTYPE))$(findstring bsd,$(OSTYPE)))
+LDFLAGS+=-lutil
+endif
 endif

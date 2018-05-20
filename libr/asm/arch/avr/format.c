@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. 
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * format_disasm.c - Formatting of disassembled instructions, with regard to the
  *  several formatting features this disassembler supports.
@@ -27,12 +27,14 @@
 #include <string.h>
 #include <stdlib.h>
 #include "format.h"
-
+#ifdef _MSC_VER
+#define strcasecmp stricmp
+#endif
 /* Formats a disassembled operand with its prefix (such as 'R' to indicate a register) into the
  * pointer to a C-string strOperand, which must be free'd after it has been used.
  * I decided to format the disassembled operands individually into strings for maximum flexibility,
  * and so that the printing of the formatted operand is not hard coded into the format operand code.
- * If an addressLabelPrefix is specified in formattingOptions (option is set and string is not NULL), 
+ * If an addressLabelPrefix is specified in formattingOptions (option is set and string is not NULL),
  * it will print the relative branch/jump/call with this prefix and the destination address as the label. */
 static int formatDisassembledOperand(char *strOperand, int operandNum, const disassembledInstruction dInstruction, formattingOptions fOptions);
 
@@ -41,16 +43,17 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 static int printDisassembledInstruction(char *out, const disassembledInstruction dInstruction, formattingOptions fOptions) {
 	//char fmt[64];
 	int retVal, i;
-	char strOperand[128];
+	char strOperand[256];
 	*out = '\0';
-	
+
 	/* If we just found a long instruction, there is nothing to be printed yet, since we don't
 	 * have the entire long address ready yet. */
 	if (AVR_Long_Instruction == AVR_LONG_INSTRUCTION_FOUND)
 		return 0;
 
 	strcat (out, dInstruction.instruction->mnemonic);
-	strcat (out, " ");
+	if (dInstruction.instruction->numOperands > 0)
+		strcat (out, " ");
 
 	for (i = 0; i < dInstruction.instruction->numOperands; i++) {
 		/* If we're not on the first operand, but not on the last one either, print a comma separating
@@ -78,6 +81,9 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 	char binary[9];
 	int retVal;
 
+	if (operandNum >= AVR_MAX_NUM_OPERANDS)
+		return 0;
+
 	switch (dInstruction.instruction->operandTypes[operandNum]) {
 	case OPERAND_NONE:
 	case OPERAND_REGISTER_GHOST:
@@ -101,7 +107,7 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 				else
 					binary[7-i] = '0';
 			}
-			binary[8] = '\0'; 
+			binary[8] = '\0';
 			retVal = sprintf(strOperand, "%s%s",
 				OPERAND_PREFIX_DATA_BIN, binary);
 		} else if (fOptions.options & FORMAT_OPTION_DATA_DEC) {
@@ -123,7 +129,7 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 #if 0
 		/* If we have an address label, print it, otherwise just print the
 		 * relative distance to the destination address. */
-		if ((fOptions.options & FORMAT_OPTION_ADDRESS_LABEL) && fOptions.addressLabelPrefix != NULL) { 
+		if ((fOptions.options & FORMAT_OPTION_ADDRESS_LABEL) && fOptions.addressLabelPrefix != NULL) {
 			retVal = sprintf(strOperand, "%s%0*X",
 				fOptions.addressLabelPrefix,
 				fOptions.addressFieldWidth,
@@ -156,7 +162,7 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 		retVal = sprintf(strOperand, "%s%02x",
 			OPERAND_PREFIX_IO_REGISTER,
 			dInstruction.operands[operandNum]);
-		break;	
+		break;
 	case OPERAND_WORD_DATA:
 		retVal = sprintf (strOperand, "%s%0*x",
 			OPERAND_PREFIX_WORD_DATA,
@@ -169,24 +175,24 @@ static int formatDisassembledOperand(char *strOperand, int operandNum, const dis
 			dInstruction.operands[operandNum]);
 		break;
 	case OPERAND_YPQ:
-		retVal = sprintf(strOperand, "Y+%d",
+		retVal = sprintf(strOperand, "y+%d",
 			dInstruction.operands[operandNum]);
 		break;
 	case OPERAND_ZPQ:
-		retVal = sprintf(strOperand, "Z+%d",
+		retVal = sprintf(strOperand, "z+%d",
 			dInstruction.operands[operandNum]);
 		break;
-	case OPERAND_X: retVal = sprintf(strOperand, "X"); break;
-	case OPERAND_XP: retVal = sprintf(strOperand, "X+"); break;
-	case OPERAND_MX: retVal = sprintf(strOperand, "-X"); break;
-	case OPERAND_Y: retVal = sprintf(strOperand, "Y"); break;
-	case OPERAND_YP: retVal = sprintf(strOperand, "Y+"); break;
-	case OPERAND_MY: retVal = sprintf(strOperand, "-Y"); break;
-	case OPERAND_Z: retVal = sprintf(strOperand, "Z"); break;
-	case OPERAND_ZP: retVal = sprintf(strOperand, "Z+"); break;
-	case OPERAND_MZ: retVal = sprintf(strOperand, "-Z"); break;
+	case OPERAND_X: retVal = sprintf(strOperand, "x"); break;
+	case OPERAND_XP: retVal = sprintf(strOperand, "x+"); break;
+	case OPERAND_MX: retVal = sprintf(strOperand, "-x"); break;
+	case OPERAND_Y: retVal = sprintf(strOperand, "y"); break;
+	case OPERAND_YP: retVal = sprintf(strOperand, "y+"); break;
+	case OPERAND_MY: retVal = sprintf(strOperand, "-y"); break;
+	case OPERAND_Z: retVal = sprintf(strOperand, "z"); break;
+	case OPERAND_ZP: retVal = sprintf(strOperand, "z+"); break;
+	case OPERAND_MZ: retVal = sprintf(strOperand, "-z"); break;
 	/* This is impossible by normal operation. */
-	default: return ERROR_UNKNOWN_OPERAND; 
+	default: return ERROR_UNKNOWN_OPERAND;
 	}
 	if (retVal < 0)
 		return ERROR_MEMORY_ALLOCATION_ERROR;

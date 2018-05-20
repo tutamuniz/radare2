@@ -1,5 +1,3 @@
-/* radare - GPL3 - 2013 condret@runas-racer.com */
-
 #include <r_types.h>
 #include <string.h>
 
@@ -91,7 +89,6 @@ const char *gb_card_type_str[]={
 	"HUC3",
 	"HUC1",
 	"XXX",			//mbc4?
-	"XXX",
 	"XXX",
 	"ROM+MBC5",
 	"ROM+MBC5+RAM",

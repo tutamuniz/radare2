@@ -26,16 +26,17 @@
 #include <stdint.h>
 #include "avr_disasm.h"
 #include "errorcodes.h"
-
+#include "avr_instructionset.c"
+#include <r_types.h>
 /* AVR instructionSet is defined in avrinstructionset.c */
-extern instructionInfo instructionSet[AVR_TOTAL_INSTRUCTIONS];
+//extern instructionInfo instructionSet[AVR_TOTAL_INSTRUCTIONS];
 
 /* Ugly public variables that are shared across format_disasm.c and avr_disasm.c. As much as
  * I didn't want to do it (and instead would have liked to find a clean & clever solution that
  * doesn't expose anything between the two interfaces), for now this was the quickest (and cleanest?)
  * way to get this special case (32-bit opcode) taken care of. */
 /* Variable to keep track of long instructions that have been found and are to be printed. */
-int AVR_Long_Instruction = 0;
+static int AVR_Long_Instruction = 0;
 /* Variable to hold the address of the long instructions */
 static uint32_t AVR_Long_Address;
 /* A copy of the AVR long instruction, we need to keep this so we know information about the
@@ -54,10 +55,10 @@ static int lookupInstruction(uint16_t opcode, int offset);
 
 
 /* Disassembles an assembled instruction, including its operands. */
-int disassembleInstruction(disassembledInstruction *dInstruction, const assembledInstruction aInstruction) {
+static int disassembleInstruction(disassembledInstruction *dInstruction, const assembledInstruction aInstruction) {
 	int insidx, i;
 	
-	if (dInstruction == NULL)
+	if (!dInstruction)
 		return ERROR_INVALID_ARGUMENTS;
 	
 	
@@ -78,8 +79,11 @@ int disassembleInstruction(disassembledInstruction *dInstruction, const assemble
 		 * so in order to jump/call to the right address (which increments by
 		 * two for every instruction), we must multiply this distance by two. */
 		//printf ("ii=%d\n", insidx);
-		if (insidx==86)
+                if(!strcmp(longInstruction.instruction->mnemonic,"call")||
+                   !strcmp(longInstruction.instruction->mnemonic,"jmp"))
+	        {
 			AVR_Long_Address *= 2;
+                }
 		*dInstruction = longInstruction;
 		return 0;
 	/* If a long instruction was printed in the last instruction disassembly,
@@ -197,9 +201,9 @@ static int disassembleOperands(disassembledInstruction *dInstruction) {
 	int i;
 	
 	/* This should never happen */
-	if (dInstruction == NULL)
+	if (!dInstruction)
 		return ERROR_INVALID_ARGUMENTS;
-	if (dInstruction->instruction == NULL)
+	if (!dInstruction->instruction)
 		return ERROR_INVALID_ARGUMENTS;
 	
 	/* For each operand, decode its original value. */
@@ -227,7 +231,9 @@ static int disassembleOperands(disassembledInstruction *dInstruction) {
 				 * Therefore we must convert to the positive value and then make the entire
 				 * short negative. */
 				dInstruction->operands[i] = (~dInstruction->operands[i]+1)&0x7F;
-				dInstruction->operands[i] = -dInstruction->operands[i];
+				dInstruction->operands[i] = -dInstruction->operands[i]+2;
+			} else {
+				dInstruction->operands[i] += 2;
 			}
 			break;
 		case OPERAND_RELATIVE_ADDRESS:
@@ -251,8 +257,10 @@ static int disassembleOperands(disassembledInstruction *dInstruction) {
 				 * is 16 bits, and the operand data's signedness only starts at 0x1000.
 				 * Therefore we must convert to the positive value and then make the entire
 				 * short negative. */
-				dInstruction->operands[i] = (~dInstruction->operands[i]+1)&0xFFF;
-				dInstruction->operands[i] = -dInstruction->operands[i]+2;
+				short val = ((~dInstruction->operands[i]) ) & 0xFFF;
+				//dInstruction->operands[i] = (~dInstruction->operands[i])&0xFFF;
+				dInstruction->operands[i] = -val + 1;
+				//dInstruction->operands[i] += 2;
 			} else {
 				dInstruction->operands[i] += 2;
 			}

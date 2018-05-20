@@ -1,3 +1,0 @@
-exe rax2 : rax2.c :
-    <library>../../libr/util
-    <include>../../libr/include ;

@@ -1,12 +1,19 @@
-/* radare - LGPL - Copyright 2012-2013 - pancake */
+/* radare - LGPL - Copyright 2012-2016 - pancake */
 
 #include <r_socket.h>
+
+static bool *breaked = NULL;
+
+R_API void r_socket_http_server_set_breaked(bool *b) {
+	breaked = b;
+}
 
 R_API RSocketHTTPRequest *r_socket_http_accept (RSocket *s, int timeout) {
 	int content_length = 0, xx, yy;
 	int pxx = 1, first = 0;
-	char buf[1024], *p, *q;
+	char buf[1500], *p, *q;
 	RSocketHTTPRequest *hr = R_NEW0 (RSocketHTTPRequest);
+	if (!hr) return NULL;
 	hr->s = r_socket_accept (s);
 	if (!hr->s) {
 		free (hr);
@@ -15,14 +22,19 @@ R_API RSocketHTTPRequest *r_socket_http_accept (RSocket *s, int timeout) {
 	if (timeout>0)
 		r_socket_block_time (hr->s, 1, timeout);
 	for (;;) {
+#if __WINDOWS__
+		if (breaked)
+			break;
+#endif
 		memset (buf, 0, sizeof (buf));
 		xx = r_socket_gets (hr->s, buf, sizeof (buf));
-		yy = r_socket_ready (hr->s, 0, 20);
+		yy = r_socket_ready (hr->s, 0, 20 * 1000); //this function uses usecs as argument
 //		eprintf ("READ %d (%s) READY %d\n", xx, buf, yy);
-		if (!yy || (!xx && !pxx))
+		if (!yy || (!xx && !pxx)) {
 			break;
+		}
 		pxx = xx;
-		
+
 		if (first==0) {
 			first = 1;
 			if (strlen (buf)<3) {
@@ -38,11 +50,14 @@ R_API RSocketHTTPRequest *r_socket_http_accept (RSocket *s, int timeout) {
 				hr->path = strdup (p+1);
 			}
 		} else {
+			if (!hr->referer && !strncmp (buf, "Referer: ", 9)) {
+				hr->referer = strdup (buf + 9);
+			} else
 			if (!hr->agent && !strncmp (buf, "User-Agent: ", 12)) {
-				hr->agent = strdup (buf+12);
+				hr->agent = strdup (buf + 12);
 			} else
 			if (!hr->host && !strncmp (buf, "Host: ", 6)) {
-				hr->host = strdup (buf+6);
+				hr->host = strdup (buf + 6);
 			} else
 			if (!strncmp (buf, "Content-Length: ", 16)) {
 				content_length = atoi (buf+16);
@@ -68,8 +83,9 @@ R_API void r_socket_http_response (RSocketHTTPRequest *rs, int code, const char 
 		"UNKNOWN";
 	if (len<1) len = out? strlen (out): 0;
 	if (!headers) headers = "";
-	r_socket_printf (rs->s, "HTTP/1.0 %d %s\n%s"
-		"Connection: close\nContent-Length: %d\n\n", code, strcode, headers, len);
+	r_socket_printf (rs->s, "HTTP/1.0 %d %s\r\n%s"
+		"Connection: close\r\nContent-Length: %d\r\n\r\n",
+		code, strcode, headers, len);
 	if (out && len>0) r_socket_write (rs->s, (void*)out, len);
 }
 
@@ -81,6 +97,8 @@ R_API ut8 *r_socket_http_handle_upload(const ut8 *str, int len, int *retlen) {
 		char *ret;
 		const char *data, *token = (const char *)str+10;
 		const char *end = strchr (token, '\n');
+		if (!end)
+			return NULL;
 		data = strstr (end, "Content-Disposition: form-data; ");
 		if (data) {
 			data = strchr (data, '\n');
@@ -117,7 +135,7 @@ R_API void r_socket_http_close (RSocketHTTPRequest *rs) {
 
 #if MAIN
 int main() {
-	RSocket *s = r_socket_new (R_FALSE);
+	RSocket *s = r_socket_new (false);
 	if (!r_socket_listen (s, "8080", NULL)) {
 		eprintf ("Cannot listen here\n");
 		return 1;
@@ -127,8 +145,9 @@ int main() {
 		if (!rs) continue;
 		if (!strcmp (rs->method, "GET")) {
 			r_socket_http_response (rs, 200,
-	"<html><body><form method=post action=/><input name=a /><input type=button></form></body>");
-		} else 
+			"<html><body><form method=post action=/>"
+			"<input name=a /><input type=button></form></body>");
+		} else
 		if (!strcmp (rs->method, "POST")) {
 			char *buf = malloc (rs->data_length+ 50);
 			strcpy (buf, "<html><body><h2>XSS test</h2>\n");
@@ -136,6 +155,9 @@ int main() {
 			strcat (buf, rs->data);
 			r_socket_http_response (rs, 200, buf);
 			free (buf);
+		} else
+		if (!strcmp (rs->method, "OPTIONS")) {
+			r_socket_http_response (rs, 200,"");
 		} else {
 			r_socket_http_response (rs, 404, "Invalid protocol");
 		}

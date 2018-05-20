@@ -4,31 +4,45 @@ VALADIR=bindings/vala
 PWD=$(shell pwd)
 PFX=${DESTDIR}${PREFIX}
 HGFILES=`find sdb-${SDBVER} -type f | grep -v hg | grep -v swp`
-MANDIR=${PFX}/share/man/man1
+MKDIR=mkdir
 
-all: src/sdb-version.h
+all: pkgconfig src/sdb_version.h
 	${MAKE} -C src
+ifeq ($(BUILD_MEMCACHE),1)
 	${MAKE} -C memcache
+endif
+
+vala:
 ifneq (${HAVE_VALA},)
 	cd ${VALADIR} && ${MAKE}
 	cd ${VALADIR}/types && ${MAKE}
+else
+	@echo Nothing to do.
 endif
 
-.PHONY: test
+.PHONY: test sdb.js pkgconfig
 test:
 	${MAKE} -C test
 
-src/sdb-version.h:
-	echo '#define SDB_VERSION "${SDBVER}"' > src/sdb-version.h
+asan:
+	${MAKE} src/sdb_version.h
+	${MAKE} -C src CC="gcc -fsanitize=address" all
 
-EMCCFLAGS=-O2 -s ASM_JS=1
+pkgconfig:
+	[ -d pkgconfig ] && ${MAKE} -C pkgconfig || true
+
+src/sdb_version.h:
+	echo '#define SDB_VERSION "${SDBVER}"' > src/sdb_version.h
+
+CFILES=cdb.c buffer.c cdb_make.c ls.c ht.c sdb.c num.c base64.c
+CFILES+=json.c ns.c lock.c util.c disk.c query.c array.c fmt.c main.c
+EMCCFLAGS=-O2 -s EXPORTED_FUNCTIONS="['_sdb_querys','_sdb_new0']"
 #EMCCFLAGS+=--embed-file sdb.data
-sdb.js: src/sdb-version.h
-	cd src ; emcc ${EMCCFLAGS} -I. -o ../sdb.js *.c 
-#json/api.c json/js0n.c json/json.c json/rangstr.c  
+sdb.js: src/sdb_version.h
+	cd src ; emcc ${EMCCFLAGS} -I. -o ../sdb.js ${CFILES}
 
 clean:
-	rm -f src/sdb-version.h
+	rm -f src/sdb_version.h
 	cd src && ${MAKE} clean
 	cd memcache && ${MAKE} clean
 	cd test && ${MAKE} clean
@@ -45,82 +59,107 @@ dist:
 	pub sdb-${SDBVER}.tar.gz
 	rm -rf sdb-${SDBVER}
 
-install-dirs:
-	mkdir -p ${MANDIR} ${PFX}/lib/pkgconfig ${PFX}/bin 
-	mkdir -p ${PFX}/share/vala/vapi ${PFX}/include/sdb
+w32dist:
+	rm -f sdb-${SDBVER}.zip
+	rm -rf sdb-${SDBVER}
+	mkdir -p sdb-${SDBVER}
+	cp src/sdb.exe sdb-${SDBVER}
+	zip -r sdb-${SDBVER}.zip sdb-${SDBVER}
+	rm -rf sdb-${SDBVER}
 
-install: install-dirs
-	cp -f src/sdb.1 ${MANDIR}
-	cp -f src/libsdb.${SOEXT} ${PFX}/lib
-	cp -f src/libsdb.${SOVER} ${PFX}/lib
-	cp -f src/sdb.h ${PFX}/include/sdb
-	cp -f src/sdb-version.h ${PFX}/include/sdb
-	cp -f src/cdb.h ${PFX}/include/sdb
-	cp -f src/ht.h ${PFX}/include/sdb
-	cp -f src/types.h ${PFX}/include/sdb
-	cp -f src/ls.h ${PFX}/include/sdb
-	cp -f src/cdb_make.h ${PFX}/include/sdb
-	cp -f src/buffer.h ${PFX}/include/sdb
-	cp -f src/config.h ${PFX}/include/sdb
-	cp -f src/sdb ${PFX}/bin
-	cp -f memcache/libmcsdb.a ${PFX}/lib
-	cp -f memcache/mcsdb.h ${PFX}/include/sdb
-	cp -f memcache/mcsdbd ${PFX}/bin
-	cp -f memcache/mcsdbc ${PFX}/bin
-	cp -f ${VALADIR}/sdb.pc ${PFX}/lib/pkgconfig
-	cp -f ${VALADIR}/mcsdb.pc ${PFX}/lib/pkgconfig
+install-dirs:
+	$(INSTALL_DIR) ${DESTDIR}${MANDIR} ${DESTDIR}${LIBDIR}/pkgconfig ${DESTDIR}${BINDIR} 
+	$(INSTALL_DIR) ${DESTDIR}${DATADIR}/vala/vapi ${DESTDIR}${INCDIR}/sdb
+
+INCFILES=src/sdb.h src/sdb_version.h src/cdb.h src/ht.h src/types.h
+INCFILES+=src/ls.h src/cdb_make.h src/buffer.h src/config.h
+
+install: pkgconfig install-dirs
+	$(INSTALL_MAN) src/sdb.1 ${DESTDIR}${MANDIR}
+	$(INSTALL_LIB) src/libsdb.${EXT_SO} ${DESTDIR}${LIBDIR}
+	$(INSTALL_DATA) src/libsdb.a ${DESTDIR}${LIBDIR}
+	-if [ "$(EXT_SO)" != "$(SOVER)" ]; then \
+	  cd ${DESTDIR}${LIBDIR} ; \
+	  mv libsdb.$(EXT_SO) libsdb.$(SOVER) ; \
+	  ln -s libsdb.$(SOVER) libsdb.$(EXT_SO) ; \
+	  ln -s libsdb.$(SOVER) libsdb.$(EXT_SO).$(SOVERSION) ; \
+	fi
+	$(INSTALL_DATA) $(INCFILES) ${DESTDIR}${INCDIR}/sdb
+	$(INSTALL_PROGRAM) src/sdb ${DESTDIR}${BINDIR}
+ifeq ($(BUILD_MEMCACHE),1)
+	$(INSTALL_DATA) memcache/libmcsdb.a ${DESTDIR}${LIBDIR}
+	$(INSTALL_DATA) memcache/mcsdb.h ${DESTDIR}${INCDIR}/sdb
+	$(INSTALL_PROGRAM) memcache/mcsdbd ${DESTDIR}${BINDIR}
+	$(INSTALL_PROGRAM) memcache/mcsdbc ${DESTDIR}${BINDIR}
+	$(INSTALL_DATA) pkgconfig/mcsdb.pc ${DESTDIR}${LIBDIR}/pkgconfig
+endif
+	$(INSTALL_DATA) pkgconfig/sdb.pc ${DESTDIR}${LIBDIR}/pkgconfig
 ifneq (${HAVE_VALA},)
-	cp -f ${VALADIR}/sdb.vapi ${PFX}/share/vala/vapi
-	cp -f ${VALADIR}/mcsdb.vapi ${PFX}/share/vala/vapi
-	cd ${VALADIR}/types && ${MAKE} install PFX=${PFX}
+	test -f ${VALADIR}/types/sdbtypes.h || $(MAKE) -C $(VALADIR)/types
+	$(INSTALL_DATA) ${VALADIR}/sdb.vapi ${DESTDIR}${DATADIR}/vala/vapi
+	cd ${VALADIR}/types && ${MAKE} install DESTDIR=${DESTDIR} PREFIX=${PREFIX}
+ifeq ($(BUILD_MEMCACHE),1)
+	$(INSTALL_DATA) ${VALADIR}/mcsdb.vapi ${DESTDIR}${DATADIR}/vala/vapi
+endif
 endif
 
 deinstall uninstall:
-	rm -rf ${PFX}/include/sdb
-	rm -f ${PFX}/bin/sdb
-	rm -f ${PFX}/bin/mcsdbc
-	rm -f ${PFX}/bin/mcsdbd
-	rm -f ${PFX}/lib/libsdb.*
-	rm -f ${PFX}/lib/libmcsdb.a
-	rm -f ${PFX}/lib/pkgconfig/sdb.pc
-	rm -f ${PFX}/lib/pkgconfig/mcsdb.pc
-	rm -f ${MANDIR}/sdb.1
+	rm -rf ${DESTDIR}${INCDIR}/sdb
+	rm -f ${DESTDIR}${BINDIR}/sdb
+	rm -f ${DESTDIR}${BINDIR}/mcsdbc
+	rm -f ${DESTDIR}${BINDIR}/mcsdbd
+	rm -f ${DESTDIR}${LIBDIR}/libsdb.*
+	rm -f ${DESTDIR}${LIBDIR}/libmcsdb.a
+	rm -f ${DESTDIR}${LIBDIR}/pkgconfig/sdb.pc
+	rm -f ${DESTDIR}${LIBDIR}/pkgconfig/mcsdb.pc
+	rm -f ${DESTDIR}${MANDIR}/sdb.1
 ifneq (${HAVE_VALA},)
-	rm -f ${PFX}/share/vala/vapi/sdb.vapi 
-	rm -f ${PFX}/share/vala/vapi/mcsdb.vapi 
-	cd ${VALADIR}/types && ${MAKE} uninstall PFX=${PFX}
+	rm -f ${DESTDIR}${DATADIR}/vala/vapi/sdb.vapi
+	rm -f ${DESTDIR}${DATADIR}/vala/vapi/mcsdb.vapi
+	cd ${VALADIR}/types && ${MAKE} uninstall DESTDIR=${DESTDIR} PREFIX=${PREFIX}
 endif
 
 symstall: install-dirs
 	cd src ; for a in libsdb.* ; do \
-		ln -fs ${PWD}/src/$$a ${PFX}/lib/$$a ; done
-	ln -fs ${PWD}/src/sdb.1 ${MANDIR}/sdb.1
-	ln -fs ${PWD}/src/sdb ${PFX}/bin
-	ln -fs ${PWD}/src/sdb.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/sdb-version.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/cdb.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/ht.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/types.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/ls.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/cdb_make.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/buffer.h ${PFX}/include/sdb
-	ln -fs ${PWD}/src/config.h ${PFX}/include/sdb
-	ln -fs ${PWD}/bindings/vala/sdb.pc ${PFX}/lib/pkgconfig
-	ln -fs ${PWD}/bindings/vala/mcsdb.pc ${PFX}/lib/pkgconfig
+		ln -fs ${PWD}/src/$$a ${DESTDIR}${LIBDIR}/$$a ; done
+	ln -fs ${PWD}/src/sdb.1 ${DESTDIR}${MANDIR}/sdb.1
+	ln -fs ${PWD}/src/sdb ${DESTDIR}${BINDIR}
+	ln -fs ${PWD}/src/sdb.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/sdb_version.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/cdb.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/ht.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/types.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/ls.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/cdb_make.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/buffer.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/src/config.h ${DESTDIR}${INCDIR}/sdb
+	ln -fs ${PWD}/bindings/vala/sdb.pc ${DESTDIR}${LIBDIR}/pkgconfig
+	ln -fs ${PWD}/bindings/vala/mcsdb.pc ${DESTDIR}${LIBDIR}/pkgconfig
 ifneq (${HAVE_VALA},)
-	ln -fs ${PWD}/vala/sdb.vapi ${PFX}/share/vala/vapi
-	ln -fs ${PWD}/vala/mcsdb.vapi ${PFX}/share/vala/vapi
-	ln -fs ${PWD}/vala/sdb.vapi ${PFX}/share/vala/vapi
-	ln -fs ${PWD}/vala/mcsdb.vapi ${PFX}/share/vala/vapi
-	cd ${VALADIR}/types && ${MAKE} symstall PFX=${PFX}
+	$(MKDIR) -p ${DESTDIR}$(VAPIDIR)
+	ln -fs ${PWD}/bindings/vala/sdb.vapi ${DESTDIR}$(VAPIDIR)
+	ln -fs ${PWD}/bindings/vala/mcsdb.vapi ${DESTDIR}$(VAPIDIR)
+	ln -fs ${PWD}/bindings/vala/sdb.vapi ${DESTDIR}$(VAPIDIR)
+	ln -fs ${PWD}/bindings/vala/mcsdb.vapi ${DESTDIR}$(VAPIDIR)
+	cd ${VALADIR}/types && ${MAKE} symstall DESTDIR=${DESTDIR} PREFIX=${PREFIX}
 endif
 
 # windows compiler prefix
+# travis/debian
 WCP=i386-mingw32
+# mxe
+#WCP=i686-pc-mingw32
 
-w32: src/sdb-version.h
+w32: src/sdb_version.h
 	cd src ; \
 	${MAKE} OS=w32 WCP=${WCP} CC=${WCP}-gcc AR=${WCP}-ar RANLIB=${WCP}-ranlib sdb.exe
 
-.PHONY: all ${VALADIR} clean dist w32
+# ios toolchain
+IOS_CC=$(shell xcrun --sdk iphoneos --find clang) -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -arch armv7 -arch arm64
+IOS_AR=$(shell xcrun --sdk iphoneos --find ar)
+IOS_RL=$(shell xcrun --sdk iphoneos --find ranlib)
+ios: src/sdb_version.h
+	${MAKE} OS=Darwin ARCH=arm CC="${IOS_CC}" AR="${IOS_AR}" RANLIB="${IOS_RL}" HAVE_VALA= all
+
+.PHONY: all ${VALADIR} clean dist w32 ios
 .PHONY: install-dirs install uninstall deinstall symstall

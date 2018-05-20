@@ -1,48 +1,59 @@
-/* sdb - LGPLv3 - Copyright 2012-2013 - pancake */
+/* sdb - MIT - Copyright 2012-2017 - pancake */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "rangstr.h"
-#include "json.h"
+#include "rangstr.c"
 #include "../types.h"
 
-void json_path_first(Rangstr *s) {
+SDB_IPI void json_path_first(Rangstr *s) {
 	char *p;
-	if (!s->p) return;
+	if (!s->p) {
+		return;
+	}
 	p = strchr (s->p, '.');
 	s->f = 0;
-	s->t = p? (size_t)(p-s->p): strlen (s->p);
+	s->t = p? (size_t)(p - s->p): strlen (s->p);
 }
 
-int json_path_next(Rangstr *s) {
+SDB_IPI int json_path_next(Rangstr *s) {
 	int stop = '.';
-	if (!s||!s->p||!s->p[s->t])
+	if (!s||!s->p||!s->p[s->t]) {
 		return 0;
-	if (!s->next) return 0;
-	if (s->p[s->t] == '"')
+	}
+	if (!s->next) {
+		return 0;
+	}
+	if (s->p[s->t] == '"') {
 		s->t++;
+	}
 rep:
 	if (s->p[s->t] == '[') {
 		s->type = '[';
 		stop = ']';
-	} else s->type = 0;
+	} else {
+		s->type = 0;
+	}
 	s->f = ++s->t;
-	if (s->p[s->t] == stop)
+	if (s->p[s->t] == stop) {
 		s->f = ++s->t;
-    if (!s->p[s->t])
-        return 0;
+	}
+	if (!s->p[s->t]) {
+		return 0;
+	}
 	while (s->p[s->t] != stop) {
 		if (!s->p[s->t]) {
 			s->next = 0;
 			return 1;
 		}
-		if (s->p[s->t] == '[')
+		if (s->p[s->t] == '[') {
 			break;
+		}
 		s->t++;
 	}
-	if (s->f == s->t)
+	if (s->f == s->t) {
 		goto rep;
+	}
 	if (s->p[s->f] == '"') {
 		s->f++;
 		s->t--;
@@ -58,7 +69,7 @@ int json_foreach(const char *s, JSONCallback cb UNUSED) {
 	unsigned short *res = NULL;
 	len = strlen (s);
 	res = malloc (len);
-	ret = js0n ((const unsigned char *)s, len, res);
+	ret = sdb_js0n ((const unsigned char *)s, len, res);
 	if (!ret) return 0;
 	if (*s=='[') {
 		for (i=0; res[i]; i+=2) {
@@ -74,11 +85,12 @@ int json_foreach(const char *s, JSONCallback cb UNUSED) {
 }
 #endif
 
-int json_walk (const char *s) {
-	unsigned short *res;
+#if 0 // UNUSED
+SDB_IPI int json_walk (const char *s) {
+	RangstrType *res;
 	int i, ret, len = strlen (s);
 	res = malloc (len+1);
-	ret = js0n ((const unsigned char *)s, len, res);
+	ret = sdb_js0n ((const unsigned char *)s, len, res);
 	if (!ret) {
 		free (res);
 		return 0;
@@ -96,30 +108,49 @@ int json_walk (const char *s) {
 	free (res);
 	return 1;
 }
+#endif
 
-Rangstr json_find (const char *s, Rangstr *rs) {
-#define RESFIXSZ 512
-	unsigned short resfix[RESFIXSZ];
-	unsigned short *res = NULL;
+SDB_IPI Rangstr json_find (const char *s, Rangstr *rs) {
+#define RESFIXSZ 1024
+	RangstrType resfix[RESFIXSZ] = {0};
+	RangstrType *res = resfix;
 	int i, j, n, len, ret;
 	Rangstr rsn;
 
-	if (!s) return rangstr_null ();
+	if (!s) {
+		return rangstr_null ();
+	}
+
 	len = strlen (s);
-	res = (len<RESFIXSZ)? resfix: malloc (len+1);
-	ret = js0n ((const unsigned char *)s, len, res);
-#define PFREE(x) if (x&&x!=resfix) free (x)
-	if (ret>0) {
+	if (len > RESFIXSZ) {
+		res = calloc (len + 1, sizeof (RangstrType));
+		if (!res) {
+			eprintf ("Cannot allocate %d byte%s\n",
+				len + 1, (len > 1)? "s": "");
+			return rangstr_null ();
+		}
+	}
+
+	ret = sdb_js0n ((const unsigned char *)s, len, res);
+#define PFREE(x) if (x && x != resfix) free (x)
+	if (ret > 0) {
 		PFREE (res);
 		return rangstr_null ();
 	}
-	if (*s=='[') {
+
+	if (*s == '[') {
 		n = rangstr_int (rs);
-		n++;
-		if (n<0) goto beach;
-		for (i=j=0; res[i] && j<n; i+=2, j++);
-		if (j<n) goto beach;
-		rsn = rangstr_news (s, res, i-2);
+		if (n < 0) {
+			goto beach;
+		}
+
+		for (i = j = 0; res[i] && j < n; i += 2, j++);
+		if (!res[i]) {
+			goto beach;
+		}
+
+		rsn = rangstr_news (s, res, i);
+
 		PFREE (res);
 		return rsn;
 	} else {
@@ -137,7 +168,7 @@ beach:
 	return rangstr_null ();
 }
 
-Rangstr json_get (const char *js, const char *p) {
+SDB_IPI Rangstr json_get (const char *js, const char *p) {
 	int x, n = 0;
 	size_t rst;
 	Rangstr rj2, rj = rangstr_new (js);
@@ -186,9 +217,3 @@ return rj;
 	} while (x != -1);
 	return rj;
 }
-
-#if 0
-char *json_set (const char *s UNUSED, const char *k UNUSED, const char *v UNUSED) {
-	return NULL;
-}
-#endif

@@ -2,10 +2,8 @@
 
 #include <r_anal.h>
 
-R_API RAnalValue *r_anal_value_new() {
-	RAnalValue *cond = R_NEW (RAnalValue);
-	memset (cond, 0, sizeof (RAnalValue));
-	return cond;
+R_API RAnalValue *r_anal_value_new() {			//makro for this ?
+	return R_NEW0 (RAnalValue);
 }
 
 R_API RAnalValue *r_anal_value_new_from_string(const char *str) {
@@ -13,8 +11,9 @@ R_API RAnalValue *r_anal_value_new_from_string(const char *str) {
 	return NULL;
 }
 
-R_API RAnalValue *r_anal_value_copy (RAnalValue *ov) {
-	RAnalValue *v = R_NEW (RAnalValue);
+R_API RAnalValue *r_anal_value_copy(RAnalValue *ov) {
+	RAnalValue *v = R_NEW0 (RAnalValue);
+	if (!v) return NULL;
 	memcpy (v, ov, sizeof (RAnalValue));
 	// reference to reg and regdelta should be kept
 	return v;
@@ -22,14 +21,20 @@ R_API RAnalValue *r_anal_value_copy (RAnalValue *ov) {
 
 // TODO: move into .h as #define free
 R_API void r_anal_value_free(RAnalValue *value) {
-	/* TODO: free RRegItem objects? */
 	free (value);
+#if 0
+	ut64 pval = (ut64)(size_t)value;
+	if (pval && pval != UT64_MAX) {
+		/* TODO: free RRegItem objects? */
+		free (value);
+	}
+#endif
 }
 
 // mul*value+regbase+regidx+delta
 R_API ut64 r_anal_value_to_ut64(RAnal *anal, RAnalValue *val) {
 	ut64 num;
-	if (val==NULL)
+	if (!val)
 		return 0LL;
 	num = val->base + (val->delta*(val->mul?val->mul:1));
 	if (val->reg)
@@ -53,15 +58,14 @@ R_API int r_anal_value_set_ut64(RAnal *anal, RAnalValue *val, ut64 num) {
 		if (anal->iob.io) {
 			ut8 data[8];
 			ut64 addr = r_anal_value_to_ut64 (anal, val);
-			r_mem_set_num (data, val->memref, num, anal->big_endian);
+			r_mem_set_num (data, val->memref, num);
 			anal->iob.write_at (anal->iob.io, addr, data, val->memref);
 		} else eprintf ("No IO binded to r_anal\n");
 	} else {
-		RRegItem *item = val->reg;
-		if (item)
-			r_reg_set_value (anal->reg, item, num);
+		if (val->reg)
+			r_reg_set_value (anal->reg, val->reg, num);
 	}
-	return R_FALSE;
+	return false;							//is this necessary
 }
 
 R_API char *r_anal_value_to_string (RAnalValue *value) {
@@ -70,25 +74,25 @@ R_API char *r_anal_value_to_string (RAnalValue *value) {
 		out = r_str_new ("");
 		if (!value->base && !value->reg) {
 			if (value->imm != -1LL)
-				out = r_str_concatf (out, "0x%"PFMT64x, value->imm);
-			else out = r_str_concat (out, "-1");
+				out = r_str_appendf (out, "0x%"PFMT64x, value->imm);
+			else out = r_str_append (out, "-1");
 		} else {
 			if (value->memref) {
 				switch (value->memref) {
-				case 1: out = r_str_concat (out, "(char)"); break;
-				case 2: out = r_str_concat (out, "(short)"); break;
-				case 4: out = r_str_concat (out, "(word)"); break;
-				case 8: out = r_str_concat (out, "(dword)"); break;
+				case 1: out = r_str_append (out, "(char)"); break;
+				case 2: out = r_str_append (out, "(short)"); break;
+				case 4: out = r_str_append (out, "(word)"); break;
+				case 8: out = r_str_append (out, "(dword)"); break;
 				}
-				out = r_str_concat (out, "[");
+				out = r_str_append (out, "[");
 			}
-			if (value->mul) out = r_str_concatf (out, "%d*", value->mul);
-			if (value->reg) out = r_str_concatf (out, "%s", value->reg->name);
-			if (value->regdelta) out = r_str_concatf (out, "+%s", value->regdelta->name);
-			if (value->base!=0) out = r_str_concatf (out, "0x%"PFMT64x, value->base);
-			if (value->delta>0) out = r_str_concatf (out, "+0x%"PFMT64x, value->delta);
-			else if (value->delta<0) out = r_str_concatf (out, "-0x%"PFMT64x, -value->delta);
-			if (value->memref) out = r_str_concat (out, "]");
+			if (value->mul) out = r_str_appendf (out, "%d*", value->mul);
+			if (value->reg) out = r_str_appendf (out, "%s", value->reg->name);
+			if (value->regdelta) out = r_str_appendf (out, "+%s", value->regdelta->name);
+			if (value->base!=0) out = r_str_appendf (out, "0x%"PFMT64x, value->base);
+			if (value->delta>0) out = r_str_appendf (out, "+0x%"PFMT64x, value->delta);
+			else if (value->delta<0) out = r_str_appendf (out, "-0x%"PFMT64x, -value->delta);
+			if (value->memref) out = r_str_append (out, "]");
 		}
 	}
 	return out;

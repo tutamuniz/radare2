@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2012-2013 - pancake */
+/* radare - LGPL - Copyright 2012-2017 - pancake */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,7 +6,7 @@
 
 #include <r_lib.h>
 #include <r_util.h>
-#include <r_flags.h>
+#include <r_flag.h>
 #include <r_anal.h>
 #include <r_parse.h>
 
@@ -17,16 +17,22 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		char *str;
 	} ops[] = {
 		{ "rsub-int",   "1 = 2 - 3"},
-		{ "float-to-double", "1 = (double) 2"},
-		{ "float-to-long", "1 = (long) 2"},
-		{ "long-to-float", "1 = (float) 2"},
+		{ "float-to-double", "1 = (double)(float) 2"},
+		{ "float-to-long", "1 = (long)(float) 2"},
+		{ "float-to-int", "1 = (int)(float) 2"},
+		{ "long-to-float", "1 = (float)(long) 2"},
+		{ "long-to-int", "1 = (int)(long) 2"},
 		{ "long-to-double", "1 = (double) 2"},
 		{ "double-to-long", "1 = (long) 2"},
+		{ "double-to-int", "1 = (int) 2"},
 		{ "int-to-double", "1 = (double) 2"},
 		{ "int-to-long", "1 = (long) 2"},
 		{ "int-to-byte", "1 = (byte) 2"},
-		{ "aget-byte", "1 = 2[3]"},
+		{ "aget-byte", "1 = (byte) 2[3]"},
+		{ "aget-short", "1 = (short) 2[3]"},
+		{ "aget-object", "1 = (object) 2[3]"},
 		{ "sput-wide", "1 = 2"},
+		{ "sput-object", "1 = 2"},
 		{ "add-long", "1 = 2 + 3"},
 		{ "add-double", "1 = 2 + 3"},
 		{ "mul-long", "1 = 2 * 3"},
@@ -36,30 +42,41 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "const/4", "1 = (wide) 2"},
 		{ "cmp-int", "1 = (2 == 3)"},
 		{ "cmp-long", "1 = (2 == 3)"},
-		{ "cmpl-double", "1 = (2 == 3)"},
+		{ "cmpl-double", "1 = (double)(2 == 3)"},
+		{ "cmpl-float", "1 = (float)(2 == 3)"},
+		{ "cmpl-int", "1 = (int)(2 == 3)"},
 		{ "cmpg-double", "1 = (2 == 3)"},
+		{ "cmpg-float", "1 = (2 == 3)"},
 		{ "or-int/2addr", "1 |= 2"},
 		{ "or-long", "1 |= 2"},
-		{ "and-long/2addr", "1 &= 2"},
+		{ "and-long/2addr", "1 &= (long) 2"},
+		{ "and-int", "1 &= (int) 2"},
+		{ "and-byte", "1 &= (byte) 2"},
 		{ "sub-float/2addr", "1 -= 2"},
 		{ "sub-float", "1 = 2 - 3"},
-		{ "sub-int", "1 = 2 - 3"},
+		{ "sub-int", "1 = (int) 2 - 3"},
+		{ "sub-long", "1 = (long) 2 - 3"},
+		{ "sub-long/2addr", "1 -= (long) 2"},
 		{ "sub-int/2addr", "1 -= 2"},
 		{ "move", "1 = 2"},
 		{ "move/16", "1 = 2"},
 		{ "move-object", "1 = (object) 2"},
+		{ "move-object/16", "1 = (object) 2"},
 		{ "move-object/from16", "1 = (object) 2"},
 		{ "move-wide/from16", "1 = (wide) 2"},
-		{ "array-length", "1 = array_length (2)"},
+		{ "array-length", "1 = Array.length (2)"},
 		{ "new-array", "1 = new array (2, 3)"},
 		{ "new-instance", "1 = new 2"},
 		{ "shr-long/2addr", "1 >>= 2"},
-		{ "shr-long", "1 = 2 >> 3"},
-		{ "ushr-int", "1 >>>= 2"},
+		{ "shr-long", "1 = (long) 2 >> 3"},
+		{ "shr-int", "1 = (int) 2 >> 3"},
+		{ "ushr-int", "1 = (int) 2 >>> 3"},
 		{ "ushr-int/2addr", "1 >>>= 2"},
+		{ "ushr-long", "1 = (long) 2 >>> 3"},
 		{ "ushl-int/2addr", "1 <<<= 2"},
 		{ "shl-int/2addr", "1 <<<= 2"},
-		{ "shl-int", "1 = 2 << 3"},
+		{ "shl-int", "1 = (int) 2 << 3"},
+		{ "shl-long", "1 = (long) 2 << 3"},
 		{ "move/from16", "1 = 2"},
 		{ "move-exception", "1 = exception"},
 		{ "move-result", "1 = result"},
@@ -71,57 +88,107 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "const-wide/32", "1 = 2"},
 		{ "const-class", "1 = (class) 2"},
 		{ "const/high16", "1 = 2"},
-		{ "rem-long", "1 = 2 % 3"},
+		{ "const", "1 = 2"},
+		{ "rem-long", "1 = (long) 2 % 3"},
+		{ "rem-double", "1 = (double) 2 % 3"},
+		{ "rem-float", "1 = (float) 2 % 3"},
 		{ "rem-long/2addr", "1 %= 2"},
-		{ "rem-float/2addr", "1 %= 2"},
+		{ "rem-float/2addr", "1 %= (float) 2"},
+		{ "rem-double/2addr", "1 %= (double) 2"},
 		{ "instance-of", "1 = insteanceof (2) == 3"},
+		{ "aput", "2[3] = 1"},
+		{ "aput-byte", "2[3] = (byte) 1"},
+		{ "aput-short", "2[3] = (short) 1"},
 		{ "aput-object", "2[3] = (object) 1"},
 		{ "aput-wide", "2[3] = (wide) 1"},
 		{ "aput-char", "2[3] = (char) 1"},
+		{ "aput-boolean", "2[3] = (bool) 1"},
 		{ "aget", "1 = 2[3]"},
 		{ "aget-wide", "1 = (wide) 2[3]"},
+		{ "aget-char", "1 = (char) 2[3]"},
 		{ "aget-boolean", "1 = (boolean) 2[3]"},
 		{ "sget", "1 = 2"},
 		{ "sget-char", "1 = (char) 2"},
+		{ "sget-short", "1 = (short) 2"},
 		{ "sget-boolean", "1 = (bool) 2"},
+		{ "sget-object", "1 = (object) 2"},
 		{ "iput", "2[3] = 1"},
+		{ "iput-object", "2[3] = (object) 1"},
+		{ "iput-byte", "2[3] = (byte) 1"},
+		{ "iput-char", "2[3] = (char) 1"},
+		{ "iput-boolean", "2[3] = (bool) 1"},
+		{ "sput-boolean", "2[3] = (bool) 1"},
+		{ "sput-char", "2[3] = (char) 1"},
+		{ "iput-int", "2[3] = (int) 1"},
 		{ "iget", "1 = 2[3]"},
+		{ "sget-byte", "1 = (byte) 2[3]"},
 		{ "iget-byte", "1 = (byte) 2[3]"},
 		{ "iget-char", "1 = (char) 2[3]"},
 		{ "iget-short", "1 = (short) 2[3]"},
 		{ "iget-wide", "1 = (wide) 2[3]"},
 		{ "iget-object", "1 = (object) 2[3]"},
 		{ "iget-boolean", "1 = (bool) 2[3]"},
+		{ "+iget-wide-volatile", "1 = (wide-volatile) 2[3]"},
 		{ "if-eq", "if (1 == 2) goto 3"},
+		{ "if-lt", "if (1 < 2) goto 3"},
+		{ "if-ne", "if (1 != 2) goto 3"},
 		{ "if-eqz", "if (!1) goto 2"},
 		{ "if-ge", "if (1 > zero) goto 2"},
-		{ "if-le", "if (1 > 2) goto 3"},
+		{ "if-le", "if (1 <= 2) goto 3"},
+		{ "if-gtz", "if (1 > 0) goto 2"},
+		{ "filled-new-array", "1 = new Array(2)"},
 		{ "neg-long", "1 = -2"},
+		{ "neg-double", "1 = -2"},
 		{ "neg-float", "1 = -2"},
 		{ "not-int", "1 = !2"},
+		{ "packed-switch", "switch 2"},
+		{ "sparse-switch", "switch 2"},
 		{ "invoke-direct", "call 2 1"},
+		{ "invoke-direct/range", "call 2 1"},
+		{ "invoke-interface", "call 2 1"},
+		{ "invoke-static", "call 2 1"},
+		{ "invoke-super", "call super 2 1"},
 		{ "invoke-super/range", "call super 2 1"},
 		{ "invoke-virtual/range", "call 2 1"},
 		{ "invoke-virtual", "call 2 1"},
 		{ "+invoke-virtual-quick", "call 2 1"},
 		{ "+invoke-interface/range", "call 2 1"},
 		{ "invoke-interface/range", "call 2 1"},
-		{ "div-float/2addr", "1 /= 2"},
+		{ "div-float/2addr", "1 /= (float) 2"},
+		{ "div-double/2addr", "1 /= (double) 2"},
+		{ "div-double", "1 = (double) 2 / 3"},
 		{ "div-float", "1 = 2 / 3"},
 		{ "div-int/lit8", "1 = 2 / 3"},
 		{ "div-int/lit16", "1 = 2 / 3"},
+		{ "div-int/2addr", "1 /= 2"},
+		{ "div-int", "1 = (int)(2 / 3)"},
 		{ "goto/16", "goto 1"},
 		{ "goto/32", "goto 1"},
+		{ "or-int", "1 = (int)(2 | 3)"},
+		{ "xor-int", "1 = (int)(2 ^ 3)"},
+		{ "xor-int/2addr", "1 ^= 2"},
+		{ "xor-byte", "1 = (byte)(2 ^ 3)"},
+		{ "xor-short", "1 = (short)(2 ^ 3)"},
+		{ "sub-int", "1 = (int)(2 - 3)"},
+		{ "if-nez", "if (1) goto 2"},
+		{ "if-ltz", "if (1 <=) goto 2"},
+		{ "mul-int", "1 = (int)(2 * 3)"},
+		{ "mul-int/lit8", "1 = (2 * 3)"},
+		{ "check-cast", "if (1 instanceof 2)"},
+		{ "add-int", "1 = (int)(2 + 3)"},
 		{ "add-int/lit8", "1 = 2 + 3"},
 		{ "add-int/lit16", "1 = 2 + 3"},
 		{ "add-int/2addr", "1 += 2"},
+		{ "add-double", "1 = (double)(2 + 3)"},
+		{ "add-double/2addr", "1 += (double)2"},
 		{ "mul-float/2addr", "1 *= 2"},
 		{ "mul-float", "1 = 2 * 3"},
+		{ "xor-long", "1 = (long)(2 ^ 3)"},
 		{ "mul-double", "1 = 2 * 3"},
 		{ "move-wide", "1 = 2"},
 		{ "move-wide/16", "1 = 2"},
-		{ "return-wide", "ret (wide) 1"},
-		{ "return-object", "ret (object) 1"},
+		{ "return-wide", "return (wide) 1"},
+		{ "return-object", "return (object) 1"},
 		// { "sget", "1 = 2[3]"},
 		{ NULL }
 	};
@@ -140,7 +207,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 				}
 				newstr[k]='\0';
 			}
-			return R_TRUE;
+			return true;
 		}
 	}
 
@@ -153,7 +220,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		}
 	}
 
-	return R_FALSE;
+	return false;
 }
 
 static int parse(RParse *p, const char *data, char *str) {
@@ -165,19 +232,19 @@ static int parse(RParse *p, const char *data, char *str) {
 	char w3[64];
 	char w4[64];
 
-	// malloc can be slow here :?
-	if ((buf = malloc (len+1)) == NULL)
-		return R_FALSE;
-	memcpy (buf, data, len+1);
-
 	if (!strcmp (data, "invalid")
 	||  !strcmp (data, "nop")
 	||  !strcmp (data, "DEPRECATED")) {
 		str[0] = 0;
-		return R_TRUE;
+		return true;
 	}
-	
-	r_str_chop (buf);
+
+	// malloc can be slow here :?
+	if (!(buf = malloc (len+1)))
+		return false;
+	memcpy (buf, data, len+1);
+
+	r_str_trim (buf);
 
 	if (*buf) {
 		w0[0]='\0';
@@ -186,13 +253,15 @@ static int parse(RParse *p, const char *data, char *str) {
 		w3[0]='\0';
 		w4[0]='\0';
 		ptr = strchr (buf, ' ');
-		if (ptr == NULL)
+		if (!ptr)
 			ptr = strchr (buf, '\t');
 		if (ptr) {
 			*ptr = '\0';
 			for (++ptr; *ptr==' '; ptr++);
-			strcpy (w0, buf);
-			strcpy (w1, ptr);
+			strncpy (w0, buf, sizeof (w0) - 1);
+			w0[sizeof(w0)-1] = '\0';
+			strncpy (w1, ptr, sizeof (w1) - 1);
+			w1[sizeof(w1)-1] = '\0';
 
 			optr=ptr;
 			ptr2 = strchr (ptr, '}');
@@ -201,23 +270,29 @@ static int parse(RParse *p, const char *data, char *str) {
 			if (ptr) {
 				*ptr = '\0';
 				for (++ptr; *ptr==' '; ptr++);
-				strcpy (w1, optr);
-				strcpy (w2, ptr);
+				strncpy (w1, optr, sizeof (w1) - 1);
+				w1[sizeof(w1)-1] = '\0';
+				strncpy (w2, ptr, sizeof (w2) - 1);
+				w2[sizeof(w2)-1] = '\0';
 				optr=ptr;
 				ptr = strchr (ptr, ',');
 				if (ptr) {
 					*ptr = '\0';
 					for (++ptr; *ptr==' '; ptr++);
-					strcpy (w2, optr);
-					strcpy (w3, ptr);
+					strncpy (w2, optr, sizeof (w2) - 1);
+					w2[sizeof(w2)-1] = '\0';
+					strncpy (w3, ptr, sizeof (w3) - 1);
+					w3[sizeof(w3)-1] = '\0';
 					optr=ptr;
 // bonus
 					ptr = strchr (ptr, ',');
 					if (ptr) {
 						*ptr = '\0';
 						for (++ptr; *ptr==' '; ptr++);
-						strcpy (w3, optr);
-						strcpy (w4, ptr);
+						strncpy (w3, optr, sizeof (w3) - 1);
+						w3[sizeof(w3)-1] = '\0';
+						strncpy (w4, ptr, sizeof (w4) - 1);
+						w4[sizeof(w4)-1] = '\0';
 					}
 				}
 			}
@@ -259,49 +334,21 @@ static int parse(RParse *p, const char *data, char *str) {
 		}
 	}
 	free (buf);
-	return R_TRUE;
+	return true;
 }
 
-static int assemble(RParse *p, char *data, char *str) {
-	char *ptr;
-	printf ("assembling '%s' to generate real asm code\n", str);
-	ptr = strchr (str, '=');
-	if (ptr) {
-		*ptr = '\0';
-		// TODO not yet implemented
-		sprintf (data, "move %s, %s", str, ptr+1);
-	} else strcpy (data, str);
-	return R_TRUE;
-}
-
-static int varsub(RParse *p, RAnalFunction *f, char *data, char *str, int len) {
-	char *ptr, *ptr2;
-	int i;
-
-	strncpy (str, data, len);
-	for (i = 0; i < R_ANAL_VARSUBS; i++)
-		if (f->varsubs[i].pat[0] != '\0' && f->varsubs[i].sub[0] != '\0' &&
-			(ptr = strstr (data, f->varsubs[i].pat))) {
-				*ptr = '\0';
-				ptr2 = ptr + strlen (f->varsubs[i].pat);
-				snprintf (str, len, "%s%s%s", data, f->varsubs[i].sub, ptr2);
-		}
-	return R_TRUE;
-}
-
-struct r_parse_plugin_t r_parse_plugin_dalvik_pseudo = {
+RParsePlugin r_parse_plugin_dalvik_pseudo = {
 	.name = "dalvik.pseudo",
 	.desc = "DALVIK pseudo syntax",
 	.init = NULL,
 	.fini = NULL,
 	.parse = parse,
-	.assemble = &assemble,
-	.varsub = &varsub,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
-	.data = &r_parse_plugin_dalvik_pseudo
+	.data = &r_parse_plugin_dalvik_pseudo,
+	.version = R2_VERSION
 };
 #endif

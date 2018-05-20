@@ -258,7 +258,7 @@ static const struct arc_operand arc_operands_a4[] =
 #define SYNTAX_LD (SYNTAX_ST + 1)
   { '3', 9, 0, ARC_OPERAND_FAKE | ARC_OPERAND_ERROR, insert_ld_syntax, extract_ld_syntax },
 
-/* Flag update bit (insertion is defered until we know how).  */
+/* Flag update bit (insertion is deferred until we know how).  */
 #define FLAG (SYNTAX_LD + 1)
   { 'f', 1, 8, ARC_OPERAND_SUFFIX, insert_flag, extract_flag },
 
@@ -528,7 +528,7 @@ static const struct arc_operand arc_operands_ac[] =
 #define COND_AC (FORCELIMM_AC + 1)
   { 'q', 5, 0, ARC_OPERAND_SUFFIX, insert_cond, extract_cond },
 
-/* flag update bit (insertion is defered until we know how) */
+/* flag update bit (insertion is deferred until we know how) */
 #define FLAG_AC (COND_AC + 1)
   { 'f', 1, 15, ARC_OPERAND_SUFFIX, insert_flag, extract_flag },
 
@@ -1108,7 +1108,7 @@ insert_reg (arc_insn insn,long *ex ATTRIBUTE_UNUSED,
 {
   static char buf[100];
   enum operand op_type = OP_NONE;
-  if (reg == NULL)
+  if (!reg)
     {
       /* We have a constant that also requires a value stored in a register
 	 field.  Handle these by updating the register field and saving the
@@ -1628,7 +1628,7 @@ insert_offset (arc_insn insn,long *ex ATTRIBUTE_UNUSED,
   return insn;
 }
 
-/* Used in st insns to do final disasemble syntax check.  */
+/* Used in st insns to do final disassemble syntax check.  */
 
 static long
 extract_st_syntax (arc_insn *insn,
@@ -2134,7 +2134,7 @@ insert_absaddr (arc_insn insn,long *ex ATTRIBUTE_UNUSED,
    The suffix extraction functions' return value is redundant since it can be
    obtained from (*OPVAL)->value.  However, the boolean suffixes don't have
    a suffix table entry for the "false" case, so values of zero must be
-   obtained from the return value (*OPVAL == NULL).  */
+   obtained from the return value (!*OPVAL).  */
 
 /* Called by the disassembler before printing an instruction.  */
 
@@ -2244,7 +2244,7 @@ extract_reg (arc_insn *insn,
 
       op_type = OP_REG;
 
-      if (reg == NULL)
+      if (!reg)
 	return 0;
       if (opval != NULL)
 	*opval = reg;
@@ -2310,7 +2310,7 @@ extract_flag (arc_insn *insn,
   val = arc_opcode_lookup_suffix (operand, 1);
   if (opval != NULL && val != NULL)
     *opval = val;
-  return val->value;
+  return val?val->value:0;
 }
 
 /* Extract the condition code (if it exists).

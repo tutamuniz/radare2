@@ -38,10 +38,10 @@
 /* utility definitions */
 #define	DUPMAX		255
 //_POSIX2_RE_DUP_MAX	/* xxx is this right? */
-#define	INFINITY	(DUPMAX + 1)
+#define	INTFINITY	(DUPMAX + 1)
 #define	NC		(CHAR_MAX - CHAR_MIN + 1)
 
-#define STRLCPY(x,y,z) strncpy((x),(y),(z));(x)[(z)]=0;
+#define STRLCPY(x,y,z) { strncpy ((x),(y),(z)); (x)[(z)? (z) - 1: 0] = 0; }
 
 /* switch off assertions (if not already off) if no REDEBUG */
 #ifndef REDEBUG

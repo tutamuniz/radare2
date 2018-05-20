@@ -2,18 +2,17 @@
 #include <r_util.h>
 
 #if __WINDOWS__
-#include <windows.h> 
-#include <stdio.h> 
+#include <windows.h>
+#include <stdio.h>
 #ifndef __CYGWIN__
 #include <tchar.h>
 #endif
 
 #define BUFSIZE 1024
-void r_sys_perror(const char *fun);
+void r_sys_perror_str(const char *fun);
 
 #define ErrorExit(x) { r_sys_perror(x); return NULL; }
-static int CreateChildProcess(const char *szCmdline, HANDLE out);
-char *ReadFromPipe(HANDLE fh); 
+char *ReadFromPipe(HANDLE fh);
 
 // HACKY
 static char *getexe(const char *str) {
@@ -25,111 +24,128 @@ static char *getexe(const char *str) {
 	return argv0;
 }
 
-R_API char *r_sys_cmd_str_w32(const char *cmd) { 
+R_API int r_sys_get_src_dir_w32(char *buf) {
+	int i = 0;
+	TCHAR fullpath[MAX_PATH + 1];
+	TCHAR shortpath[MAX_PATH + 1];
+	char *path;
+
+	if (!GetModuleFileName (NULL, fullpath, MAX_PATH + 1) ||
+		!GetShortPathName (fullpath, shortpath, MAX_PATH + 1)) {
+		return false;
+	}
+	path = r_sys_conv_utf16_to_utf8 (shortpath);
+	memcpy (buf, path, strlen(path) + 1);
+	free (path);
+	i = strlen (buf);
+	while(i > 0 && buf[i-1] != '/' && buf[i-1] != '\\') {
+		buf[--i] = 0;
+	}
+	// Remove the last separator in the path.
+	if(i > 0) {
+		buf[--i] = 0;
+	}
+	return true;
+}
+
+R_API char *r_sys_cmd_str_w32(const char *cmd) {
 	char *ret = NULL;
 	HANDLE out = NULL;
-	HANDLE in = NULL;
-	SECURITY_ATTRIBUTES saAttr; 
+	SECURITY_ATTRIBUTES saAttr;
 	char *argv0 = getexe (cmd);
 
-	// Set the bInheritPlugin flag so pipe handles are inherited. 
-	saAttr.nLength = sizeof (SECURITY_ATTRIBUTES); 
-	saAttr.bInheritHandle = TRUE; 
-	saAttr.lpSecurityDescriptor = NULL; 
+	// Set the bInheritPlugin flag so pipe handles are inherited.
+	saAttr.nLength = sizeof (SECURITY_ATTRIBUTES);
+	saAttr.bInheritHandle = TRUE;
+	saAttr.lpSecurityDescriptor = NULL;
 	HANDLE fh;
 
-	// Create a pipe for the child process's STDOUT. 
-	if (!CreatePipe (&fh, &out, &saAttr, 0)) 
-		ErrorExit ("StdoutRd CreatePipe"); 
+	// Create a pipe for the child process's STDOUT.
+	if (!CreatePipe (&fh, &out, &saAttr, 0))
+		ErrorExit ("StdoutRd CreatePipe");
 
 	// Ensure the read handle to the pipe for STDOUT is not inherited.
 	if (!SetHandleInformation (fh, HANDLE_FLAG_INHERIT, 0) )
-		ErrorExit ("Stdout SetHandleInformation"); 
+		ErrorExit ("Stdout SetHandleInformation");
 
-	CreateChildProcess (cmd, out);
+	r_sys_create_child_proc_w32 (cmd, out);
 
-	in = CreateFile (argv0,
-			GENERIC_READ, 
-			FILE_SHARE_READ, 
-			NULL, 
-			OPEN_EXISTING, 
-			FILE_ATTRIBUTE_READONLY, 
-			NULL); 
-
-	if (in == INVALID_HANDLE_VALUE) {
-		eprintf ("CreateFile (%s)\n", argv0);
-		ErrorExit ("CreateFile"); 
-	}
-
-	// Close the write end of the pipe before reading from the 
+	// Close the write end of the pipe before reading from the
 	// read end of the pipe, to control child process execution.
 	// The pipe is assumed to have enough buffer space to hold the
 	// data the child process has already written to it.
 	if (!CloseHandle (out))
-		ErrorExit ("StdOutWr CloseHandle"); 
+		ErrorExit ("StdOutWr CloseHandle");
 	ret = ReadFromPipe (fh);
 	free (argv0);
 
-	return ret; 
-} 
+	return ret;
+}
 
-static int CreateChildProcess(const char *szCmdline, HANDLE out) { 
-	PROCESS_INFORMATION piProcInfo; 
-	STARTUPINFO siStartInfo;
-	BOOL bSuccess = FALSE; 
+R_API bool r_sys_create_child_proc_w32(const char *cmdline, HANDLE out) {
+	PROCESS_INFORMATION pi = {0};
+	STARTUPINFO si = {0};
+	LPTSTR cmdline_;
+	bool ret;
 
-	ZeroMemory (&piProcInfo, sizeof (PROCESS_INFORMATION) );
-
-	// Set up members of the STARTUPINFO structure. 
+	// Set up members of the STARTUPINFO structure.
 	// This structure specifies the STDIN and STDOUT handles for redirection.
-	ZeroMemory (&siStartInfo, sizeof (STARTUPINFO) );
-	siStartInfo.cb = sizeof(STARTUPINFO); 
-	siStartInfo.hStdError = out;
-	siStartInfo.hStdOutput = out;
-	siStartInfo.hStdInput = NULL;
-	siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
-
-	bSuccess = CreateProcess (NULL, 
-			(LPSTR)szCmdline,// command line 
-			NULL,          // process security attributes 
-			NULL,          // primary thread security attributes 
-			TRUE,          // handles are inherited 
-			0,             // creation flags 
-			NULL,          // use parent's environment 
-			NULL,          // use parent's current directory 
-			&siStartInfo,  // STARTUPINFO pointer 
-			&piProcInfo);  // receives PROCESS_INFORMATION 
-
-	if (bSuccess) {
-		CloseHandle (piProcInfo.hProcess);
-		CloseHandle (piProcInfo.hThread);
-	} else r_sys_perror ("CreateProcess");
-	return bSuccess;
+	si.cb = sizeof (STARTUPINFO);
+	si.hStdError = out;
+	si.hStdOutput = out;
+	si.hStdInput = NULL;
+	si.dwFlags |= STARTF_USESTDHANDLES;
+	cmdline_ = r_sys_conv_utf8_to_utf16 (cmdline);
+	if ((ret = CreateProcess (NULL,
+			cmdline_,// command line
+			NULL,          // process security attributes
+			NULL,          // primary thread security attributes
+			TRUE,          // handles are inherited
+			0,             // creation flags
+			NULL,          // use parent's environment
+			NULL,          // use parent's current directory
+			&si,  // STARTUPINFO pointer
+			&pi))) {  // receives PROCESS_INFORMATION 
+		ret = 1;
+		CloseHandle (pi.hProcess);
+		CloseHandle (pi.hThread);
+	} else {
+		r_sys_perror ("CreateProcess");
+	}
+	free (cmdline_);
+	return ret;
 }
 
 char *ReadFromPipe(HANDLE fh) {
 	DWORD dwRead;
-	CHAR chBuf[BUFSIZE]; 
+	CHAR chBuf[BUFSIZE];
 	BOOL bSuccess = FALSE;
 	char *str;
 	int strl = 0;
 	int strsz = BUFSIZE+1;
 
 	str = malloc (strsz);
-	for (;;) { 
+	if (!str) {
+		return NULL;
+	}
+	for (;;) {
 		bSuccess = ReadFile (fh, chBuf, BUFSIZE, &dwRead, NULL);
-		if (! bSuccess || dwRead == 0) break; 
-		chBuf[dwRead] = '\0';
+		if (!bSuccess || dwRead == 0) {
+			break;
+		}
 		if (strl+dwRead>strsz) {
+			char *str_tmp = str;
 			strsz += 4096;
 			str = realloc (str, strsz);
-			if (!str)
+			if (!str) {
+				free (str_tmp);
 				return NULL;
+			}
 		}
 		memcpy (str+strl, chBuf, dwRead);
 		strl += dwRead;
-	} 
+	}
 	str[strl] = 0;
 	return str;
-} 
+}
 #endif

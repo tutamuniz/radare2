@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2013 - condret@runas-racer.com */
+/* radare - LGPL - Copyright 2013 - 2014 - condret@runas-racer.com */
 
 #define GB_8BIT		1
 #define	GB_16BIT	2
@@ -12,12 +12,14 @@ typedef struct{
 	const int type;
 } gb_opcode;
 
+#ifndef GB_DIS_LEN_ONLY
 static const char *cb_ops[]={	"rlc","rrc","rl","rr","sla","sra","swap","srl",
 				"bit 0,","bit 1,","bit 2,","bit 3,","bit 4,","bit 5,","bit 6,","bit 7,",
 				"res 0,","res 1,","res 2,","res 3,","res 4,","res 5,","res 6,","res 7,",
 				"set 0,","set 1,","set 2,","set 3,","set 4,","set 5,","set 6,","set 7,"};
 
 static const char *cb_regs[]={	"b","c","d","e","h","l","[hl]","a"};
+#endif
 
 static gb_opcode gb_op[] = {
 	{"nop"			,GB_8BIT},			//0x00
@@ -241,7 +243,7 @@ static gb_opcode gb_op[] = {
 	{"adc 0x%02x"		,GB_8BIT+ARG_8},
 	{"rst 8"		,GB_8BIT},
 
-	{"ret nc"		,GB_8BIT},			//0xd0
+	{"ret nC"		,GB_8BIT},			//0xd0
 	{"pop de"		,GB_8BIT},
 	{"jp nC, 0x%04x"	,GB_8BIT+ARG_16},
 	{"invalid"		,GB_8BIT},
@@ -283,7 +285,7 @@ static gb_opcode gb_op[] = {
 	{"push af"		,GB_8BIT},
 	{"or 0x%02x"		,GB_8BIT+ARG_8},
 	{"rst 48"		,GB_8BIT},
-	{"ld hl, [sp + 0x%02x]"	,GB_8BIT+ARG_8},
+	{"ld hl, sp + 0x%02x"	,GB_8BIT+ARG_8},		//signed
 	{"ld sp, hl"		,GB_8BIT},
 	{"ld a, [0x%04x]"	,GB_8BIT+ARG_16},
 	{"ei"			,GB_8BIT},

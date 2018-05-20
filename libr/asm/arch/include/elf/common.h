@@ -201,6 +201,8 @@
    unofficial e_machine number should eventually ask registry@caldera.com for
    an officially blessed number to be added to the list above.	*/
 
+#define EM_RISCV	243	/* RISC V */
+
 /* Old version of Sparc v9, from before the ABI;
    This should be removed shortly.  */
 #define EM_OLD_SPARCV9		11
@@ -578,7 +580,7 @@
 /* The next four dynamic tags are used on Solaris.  We support them
    everywhere.	Note these values lie outside of the (new) range for
    OS specific values.	This is a deliberate special case and we
-   maintain it for backwards compatability.  */
+   maintain it for backwards compatibility.  */
 #define DT_VALRNGLO	0x6ffffd00
 #define DT_GNU_PRELINKED 0x6ffffdf5
 #define DT_GNU_CONFLICTSZ 0x6ffffdf6
@@ -643,7 +645,7 @@
 #define DF_P1_LAZYLOAD	0x00000001
 #define DF_P1_GROUPPERM	0x00000002
 
-/* Flag value in in the DT_FLAGS_1 .dynamic entry.  */
+/* Flag value in the DT_FLAGS_1 .dynamic entry.  */
 #define DF_1_NOW	0x00000001
 #define DF_1_GLOBAL	0x00000002
 #define DF_1_GROUP	0x00000004

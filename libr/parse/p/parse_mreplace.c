@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2012 nibble<.ds@gmail.com> */
+/* radare - LGPL - Copyright 2009-2015 nibble */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,33 +17,46 @@ struct mreplace_t {
 };
 
 static int parse(RParse *p, const char *data, char *str) {
-	struct mreplace_t *sdata = (struct mreplace_t*)data;
+	const struct mreplace_t *sdata = (struct mreplace_t*)data;
 	char *buf = treplace (sdata->data, sdata->search, sdata->replace);
 	memcpy (str, buf, R_PARSE_STRLEN);
 	free (buf);
-	return R_TRUE;
+	return true;
 }
 
-struct r_parse_plugin_t r_parse_plugin_mreplace = {
+static int assemble(RParse *p, char *data, char *str) {
+	char *ptr = strchr (str, '=');
+	if (ptr) {
+		*ptr = '\0';
+		sprintf (data, "mov %s, %s", str, ptr+1);
+	} else strcpy (data, str);
+	return true;
+}
+
+static bool varsub(RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *data, char *str, int len) {
+	strncpy (str, data, len);
+	return false;
+}
+
+RParsePlugin r_parse_plugin_mreplace = {
 	.name = "mreplace",
 	.desc = "mreplace parsing plugin",
-	.init = NULL,
-	.fini = NULL,
-	.parse = parse,
-	.assemble = NULL,
-	.filter = NULL
+	.parse = &parse,
+	.assemble = &assemble,
+	.varsub = &varsub,
 };
 
 #else
-struct r_parse_plugin_t r_parse_plugin_mreplace = {
+RParsePlugin r_parse_plugin_mreplace = {
 	.name = "mreplace",
 	.desc = "mreplace parsing plugin (NOT SUPPORTED FOR THIS PLATFORM)",
 };
 #endif
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
-	.data = &r_parse_plugin_mreplace
+	.data = &r_parse_plugin_mreplace,
+	.version = R2_VERSION
 };
 #endif

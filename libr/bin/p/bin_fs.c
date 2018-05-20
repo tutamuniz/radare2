@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2013 - pancake */
+/* radare - LGPL - Copyright 2011-2017 - pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -6,74 +6,105 @@
 #include <r_bin.h>
 #include "../../fs/types.h"
 
-static int check(RBinFile *arch);
+static char *fsname(const ut8* buf, ut64 length) {
+	ut8 fs_lbuf[1024];
+	int i, j, len, ret = false;
 
-static char *fsname(RBinFile *arch) {
-	ut8 buf[1024];
-	int i, j, len, ret = R_FALSE;
-
-	for (i=0; fstypes[i].name; i++) {
+	for (i = 0; fstypes[i].name; i++) {
 		RFSType *f = &fstypes[i];
-		len = R_MIN (f->buflen, sizeof (buf));
-		memset (buf, 0, sizeof (buf));
-		r_buf_read_at (arch->buf, f->bufoff, buf, len);
-		if ((f->buflen>0) && (len>=f->buflen)) {
-			int min = R_MIN (f->buflen, sizeof (buf));
-			if (!memcmp (buf, f->buf, min)) {
-				ret = R_TRUE;
-				len = R_MIN (f->bytelen, sizeof (buf));
-				r_buf_read_at (arch->buf, f->byteoff, buf, len);
-				for (j=0; j<f->bytelen; j++) {
-					if (buf[j] != f->byte) {
-						ret = R_FALSE;
+
+		len = R_MIN (f->buflen, sizeof (fs_lbuf));
+		memset (fs_lbuf, 0, sizeof (fs_lbuf));
+		if (f->bufoff + len > length) {
+			break;
+		}
+		memcpy (fs_lbuf, buf + f->bufoff, len);
+		if ((f->buflen > 0) && len >= f->buflen) {
+			int min = R_MIN (f->buflen, sizeof (fs_lbuf));
+			if (!memcmp (fs_lbuf, f->buf, min)) {
+				ret = true;
+				len = R_MIN (f->bytelen, sizeof (fs_lbuf));
+				if (f->byteoff + len > length) {
+					break;
+				}
+				memcpy (fs_lbuf, buf + f->byteoff, len);
+				// for (j = 0; j < f->bytelen; j++) {
+				for (j = 0; j < len; j++) {
+					if (fs_lbuf[j] != f->byte) {
+						ret = false;
 						break;
 					}
 				}
-				if (ret) return strdup (f->name);
+				if (ret) {
+					return strdup (f->name);
+				}
 			}
 		}
 	}
 	return NULL;
 }
 
-static int load(RBinFile *arch) {
-	if (check (arch))
-		return R_TRUE;
-	return R_FALSE;
+static bool check_bytes(const ut8 *buf, ut64 length) {
+	if (!buf || (st64)length < 1) {
+		return false;
+	}
+	char *p = fsname (buf, length);
+	free (p);
+	return p != NULL;
 }
 
-static int destroy(RBinFile *arch) {
-	//r_bin_fs_free ((struct r_bin_fs_obj_t*)arch->o->bin_obj);
-	return R_TRUE;
+static void * load_bytes(RBinFile *bf, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
+	if (check_bytes (buf, sz)) {
+		return R_NOTNULL;
+	}
+	return NULL;
 }
 
-static ut64 baddr(RBinFile *arch) {
+static bool load(RBinFile *bf) {
+	const ut8 *bytes = bf ? r_buf_buffer (bf->buf) : NULL;
+	ut64 sz = bf ? r_buf_size (bf->buf): 0;
+	ut64 la = (bf && bf->o) ? bf->o->loadaddr: 0;
+	return load_bytes (bf, bytes, sz, la, bf? bf->sdb: NULL) != NULL;
+}
+
+static int destroy(RBinFile *bf) {
+	//r_bin_fs_free ((struct r_bin_fs_obj_t*)bf->o->bin_obj);
+	return true;
+}
+
+static ut64 baddr(RBinFile *bf) {
 	return 0;
 }
 
 /* accelerate binary load */
-static RList *strings(RBinFile *arch) {
+static RList *strings(RBinFile *bf) {
 	return NULL;
 }
 
-static RBinInfo* info(RBinFile *arch) {
-	char *p;
+static RBinInfo* info(RBinFile *bf) {
 	RBinInfo *ret = NULL;
-	if (!(ret = R_NEW (RBinInfo)))
+	const ut8 *bytes;
+	ut64 sz;
+
+	if (!bf) {
 		return NULL;
-	memset (ret, '\0', sizeof (RBinInfo));
-	ret->lang = NULL;
-	strncpy (ret->file, arch->file, R_BIN_SIZEOF_STRINGS-1);
-	strncpy (ret->rpath, "NONE", R_BIN_SIZEOF_STRINGS-1);
-	strncpy (ret->type, "fs", sizeof (ret->type)-1); // asm.arch
-	strncpy (ret->bclass, "1.0", sizeof (ret->bclass)-1);
-	strncpy (ret->rclass, "fs", sizeof (ret->rclass)-1); // file.type
-	strncpy (ret->os, "any", sizeof (ret->os)-1);
-	strncpy (ret->subsystem, "unknown", sizeof (ret->subsystem)-1);
-	strncpy (ret->machine, "any", sizeof (ret->machine)-1);
-	p = fsname (arch);
-	strncpy (ret->arch, p, sizeof (ret->arch)-1);
-	free (p);
+	}
+	bytes = r_buf_buffer (bf->buf);
+	if (!bytes) {
+		return NULL;
+	}
+	sz = bf->buf ? r_buf_size (bf->buf): 0;
+	if (!(ret = R_NEW0 (RBinInfo))) {
+		return NULL;
+	}
+	ret->file = bf->file? strdup (bf->file): NULL;
+	ret->type = strdup ("fs");
+	ret->bclass = fsname (bytes, sz);
+	ret->rclass = strdup ("fs");
+	ret->os = strdup ("any");
+	ret->subsystem = strdup ("unknown");
+	ret->machine = strdup ("any");
+	// ret->arch = strdup ("any");
 	ret->has_va = 0;
 	ret->bits = 32;
 	ret->big_endian = 0;
@@ -81,45 +112,25 @@ static RBinInfo* info(RBinFile *arch) {
 	return ret;
 }
 
-static int check(RBinFile *arch) {
-	char *p;
-	int ret;
-
-	p = fsname (arch);
-	ret = (p)? R_TRUE: R_FALSE;
-	free (p);
-	return ret;
-}
-
 RBinPlugin r_bin_plugin_fs = {
 	.name = "fs",
 	.desc = "filesystem bin plugin",
+	.author = "pancake",
+	.version = "1.0",
 	.license = "LGPL3",
-	.init = NULL,
-	.fini = NULL,
 	.load = &load,
+	.load_bytes = &load_bytes,
 	.destroy = &destroy,
-	.check = &check,
+	.check_bytes = &check_bytes,
 	.baddr = &baddr,
-	.boffset = NULL,
-	.binsym = NULL,
-	.entries = NULL,
-	.sections = NULL,
-	.symbols = NULL,
-	.imports = NULL,
 	.strings = &strings,
 	.info = &info,
-	.fields = NULL,
-	.libs = NULL,
-	.relocs = NULL,
-	.meta = NULL,
-	.write = NULL,
-	.demangle_type = NULL
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
-	.data = &r_bin_plugin_fs
+	.data = &r_bin_plugin_fs,
+	.version = R2_VERSION
 };
 #endif

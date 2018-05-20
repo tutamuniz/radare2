@@ -58,7 +58,6 @@
   operation.
  */
 
-#include <config.h>
 #include <grub/mm.h>
 #include <grub/misc.h>
 #include <grub/err.h>
@@ -216,11 +215,15 @@ grub_real_malloc (grub_mm_header_t *first, grub_size_t n, grub_size_t align)
       if (extra)
 	extra = align - extra;
 
-      if (! p || !p->magic)
+      if (! p || !p->magic) {
 	grub_fatal ("null in the ring");
+        return NULL;
+      }
 
-      if (p->magic != GRUB_MM_FREE_MAGIC)
+      if (p->magic != GRUB_MM_FREE_MAGIC) {
 	grub_fatal ("free magic is broken at %p: 0x%x", p, p->magic);
+        return NULL;
+      }
 
       if (p->size >= n + extra)
 	{

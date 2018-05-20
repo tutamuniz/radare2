@@ -1,17 +1,37 @@
-/* radare - LGPL - Copyright 2009-2013 - nibble */
+/* radare - LGPL - Copyright 2009-2017 - pancake, nibble */
 
 #define R_BIN_ELF64 1
 #include "bin_elf.c"
 
-static int check(RBinFile *arch) {
-	if (arch && arch->buf && arch->buf->buf)
-	if (!memcmp (arch->buf->buf, "\x7F\x45\x4c\x46\x02", 5))
-		return R_TRUE;
-	return R_FALSE;
+static bool check_bytes(const ut8 *buf, ut64 length) {
+	if (buf && length >= 5) {
+		if (!memcmp (buf, "\x7F\x45\x4c\x46\x02", 5)) {
+			return true;
+		}
+	}
+	return false;
 }
 
-extern struct r_bin_meta_t r_bin_meta_elf64;
+extern struct r_bin_dbginfo_t r_bin_dbginfo_elf64;
 extern struct r_bin_write_t r_bin_write_elf64;
+
+static ut64 get_elf_vaddr64 (RBinFile *bf, ut64 baddr, ut64 paddr, ut64 vaddr) {
+	//NOTE(aaSSfxxx): since RVA is vaddr - "official" image base, we just need to add imagebase to vaddr
+	struct Elf_(r_bin_elf_obj_t)* obj = bf->o->bin_obj;
+	return obj->baddr - obj->boffset + vaddr;
+}
+
+static void headers64(RBinFile *bf) {
+#define p bf->rbin->cb_printf
+	const ut8 *buf = r_buf_get_at (bf->buf, 0, NULL);
+	p ("0x00000000  ELF64       0x%08x\n", r_read_le32 (buf));
+	p ("0x00000010  Type        0x%04x\n", r_read_le16 (buf + 0x10));
+	p ("0x00000012  Machine     0x%04x\n", r_read_le16 (buf + 0x12));
+	p ("0x00000014  Version     0x%08x\n", r_read_le32 (buf + 0x14));
+	p ("0x00000018  Entrypoint  0x%08"PFMT64x"\n", r_read_le64 (buf + 0x18));
+	p ("0x00000020  PhOff       0x%08"PFMT64x"\n", r_read_le64 (buf + 0x20));
+	p ("0x00000028  ShOff       0x%08"PFMT64x"\n", r_read_le64 (buf + 0x28));
+}
 
 static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data, int datalen) {
 	ut32 p_start, p_phoff, p_phdr;
@@ -54,7 +74,7 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 	p_phdr = buf->length;
 	D (1);  // p_type
 	D (5);  // p_flags = PF_R | PF_X
-	Q (0);  // p_offset 
+	Q (0);  // p_offset
 	p_vaddr = buf->length;
 	Q (-1); // p_vaddr = 0xFFFFFFFF
 	p_paddr = buf->length;
@@ -98,31 +118,40 @@ RBinPlugin r_bin_plugin_elf64 = {
 	.name = "elf64",
 	.desc = "elf64 bin plugin",
 	.license = "LGPL3",
-	.init = NULL,
-	.fini = NULL,
+	.get_sdb = &get_sdb,
 	.load = &load,
+	.load_bytes = &load_bytes,
+	.load_buffer= &load_buffer,
 	.destroy = &destroy,
-	.check = &check,
+	.check_bytes = &check_bytes,
 	.baddr = &baddr,
-	.boffset = NULL,
+	.boffset = &boffset,
 	.binsym = &binsym,
 	.entries = &entries,
 	.sections = &sections,
 	.symbols = &symbols,
 	.imports = &imports,
-	.strings = NULL,
+	.minstrlen = 4,
 	.info = &info,
 	.fields = &fields,
+	.header = &headers64,
+	.size = &size,
 	.libs = &libs,
 	.relocs = &relocs,
-	.meta = &r_bin_meta_elf64,
+	.patch_relocs = &patch_relocs,
+	.dbginfo = &r_bin_dbginfo_elf64,
 	.create = &create,
 	.write = &r_bin_write_elf64,
+	.get_vaddr = &get_elf_vaddr64,
+	.file_type = &get_file_type,
+	.regstate = &regstate,
+	.maps = &maps,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
-	.data = &r_bin_plugin_elf64
+	.data = &r_bin_plugin_elf64,
+	.version = R2_VERSION
 };
 #endif

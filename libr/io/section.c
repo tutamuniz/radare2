@@ -1,306 +1,685 @@
-/* radare - LGPL - Copyright 2008-2013 - pancake, nibble */
+/* radare2 - LGPL - Copyright 2017-2018 - condret , alvarofe */
 
-#include "r_io.h"
+#include <r_io.h>
+#include <r_util.h>
+#include <sdb.h>
+#include <r_types.h>
+#include <stdio.h>
+#include <string.h>
+
+static void section_free(void *p) {
+	RIOSection *s = (RIOSection *) p;
+	if (s) {
+		free (s->name);
+		free (s);
+	}
+}
 
 R_API void r_io_section_init(RIO *io) {
-	io->next_section_id = 0;
-	io->enforce_rwx = 0; // do not enforce RWX section permissions by default
-	io->enforce_seek = 0; // do not limit seeks out of the file by default
-	io->sections = r_list_new ();
-}
-
-#if 0
-static int cmpaddr (void *_a, void *_b) {
-	RIOSection *a = _a, *b = _b;
-	return (a->vaddr > b->vaddr);
-}
-#endif
-
-R_API RIOSection *r_io_section_get_name(RIO *io, const char *name) {
-	RListIter *iter;
-	RIOSection *s;
-	if (name)
-	r_list_foreach (io->sections, iter, s) {
-		if (!strcmp (name, s->name))
-			return s;
+	if (io) {
+		if (!io->sections) {
+			io->sections = ls_newf (section_free);
+		}
+		io->sec_ids = r_id_pool_new (0, UT32_MAX);
 	}
-	return NULL;
 }
 
-R_API void r_io_section_add(RIO *io, ut64 offset, ut64 vaddr, ut64 size, ut64 vsize, int rwx, const char *name) {
-	int update = 0;
-	RIOSection *s;
-
-	if (size==0 || size>0xf0000000) {
-		if (size>0 && size != UT64_MAX && size != UT32_MAX)
-			eprintf ("Invalid size (0x%08"PFMT64x") for section '%s' at 0x%08"PFMT64x"\n",
-			size, name, vaddr);
+R_API void r_io_section_fini(RIO *io) {
+	if (!io) {
 		return;
 	}
-	s = r_io_section_get_name (io, name);
-	if (s == NULL) {
-		s = R_NEW (RIOSection);
-		s->id = io->next_section_id++;
-	} else update = 1;
-	s->offset = offset;
-	s->vaddr = vaddr;
-	s->size = size;
-	s->vsize = vsize;
-	s->rwx = rwx;
-	s->arch = s->bits = 0;
-	if (!update) {
-		if (name) strncpy (s->name, name, sizeof (s->name)-4);
-		else *s->name = '\0';
-		r_list_append (io->sections, s);
+	ls_free (io->sections);
+	r_id_pool_free (io->sec_ids);
+	io->sections = NULL;
+	io->sec_ids = NULL;
+}
+
+R_API int r_io_section_exists_for_id(RIO *io, ut32 id) {
+	SdbListIter *iter;
+	RIOSection *sec;
+	if (!io || !io->sections) {
+		return false;
 	}
-}
-
-R_API RIOSection *r_io_section_get_i(RIO *io, int idx) {
-	RListIter *iter;
-	RIOSection *s;
-	r_list_foreach (io->sections, iter, s) {
-		if (s->id == idx)
-			return s;
+	ls_foreach (io->sections, iter, sec) {
+		if (sec->id == id) {
+			return true;
+		}
 	}
-	return NULL;
+	return false;
 }
 
-R_API int r_io_section_rm(RIO *io, int idx) {
-	return r_list_del_n (io->sections, idx);
-}
-
-// TODO: implement as callback
-R_API void r_io_section_list(RIO *io, ut64 offset, int rad) {
-	int i = 0;
-	RListIter *iter;
-	RIOSection *s;
-
-	if (io->va || io->debug)
-		offset = r_io_section_vaddr_to_offset (io, offset);
-	r_list_foreach (io->sections, iter, s) {
-		if (rad) {
-			char *n = strdup (s->name);
-			r_name_filter (n, strlen (n));
-			io->printf ("f section.%s %"PFMT64d" 0x%"PFMT64x"\n",
-				n, s->size, s->vaddr);
-			io->printf ("S 0x%08"PFMT64x" 0x%08"PFMT64x" 0x%08"
-				PFMT64x" 0x%08"PFMT64x" %s %s\n", s->offset,
-				s->vaddr, s->size, s->vsize, n, r_str_rwx_i (s->rwx));
+R_API RIOSection *r_io_section_add(RIO *io, ut64 paddr, ut64 vaddr, ut64 size,
+				    ut64 vsize, int flags, const char *name,
+				    ut32 bin_id, int fd) {
+	if (!io || !io->sections || !io->sec_ids || !r_io_desc_get (io, fd) ||
+		UT64_ADD_OVFCHK (size, paddr) || UT64_ADD_OVFCHK (size, vaddr) || !vsize) {
+		return NULL;
+	}
+	RIOSection *sec = R_NEW0 (RIOSection);
+	if (sec) {
+		sec->paddr = paddr;
+		sec->vaddr = vaddr;
+		sec->size = size;
+		sec->vsize = vsize;
+		sec->flags = flags;
+		sec->bin_id = bin_id;
+		sec->fd = fd;
+		if (!name) {
+			sec->name = r_str_newf ("section.0x016%"PFMT64x "", vaddr);
 		} else {
-			io->printf ("[%02d] %c 0x%08"PFMT64x" %s va=0x%08"PFMT64x
-				" sz=0x%08"PFMT64x" vsz=%08"PFMT64x" %s",
-			s->id, (offset>=s->offset && offset<s->offset+s->size)?'*':'.',
-			s->offset, r_str_rwx_i (s->rwx), s->vaddr, s->size, s->vsize, s->name);
-			if (s->arch && s->bits)
-				io->printf ("  ; %s %d\n", r_sys_arch_str (s->arch), s->bits);
-			else io->printf ("\n");
+			sec->name = strdup (name);
 		}
-		i++;
-	}
-}
-
-/* TODO: move to print ??? support pretty print of ranges following an array of offsetof */
-R_API void r_io_section_list_visual(RIO *io, ut64 seek, ut64 len) {
-	RListIter *iter;
-	RIOSection *s;
-	ut64 min = -1;
-	ut64 max = -1;
-	ut64 mul;
-	int j, i, width = 30; //config.width-30;
-
-	seek = (io->va || io->debug) ? r_io_section_vaddr_to_offset (io, seek) : seek;
-	r_list_foreach (io->sections, iter, s) {
-		if (min == -1 || s->offset < min)
-			min = s->offset;
-		if (max == -1 || s->offset+s->size > max)
-			max = s->offset+s->size;
-	}
-
-	mul = (max-min) / width;
-	if (min != -1 && mul != 0) {
-		i = 0;
-		r_list_foreach (io->sections, iter, s) {
-			io->printf ("%02d%c 0x%08"PFMT64x" |",
-				i, (seek>=s->offset && seek<s->offset+s->size)?'*':' ', s->offset);
-			for (j=0; j<width; j++) {
-				ut64 pos = min + (j*mul);
-				ut64 npos = min + ((j+1)*mul);
-				if (s->offset <npos && (s->offset+s->size)>pos)
-					io->printf ("#");
-				else io->printf ("-");
-			}
-			io->printf ("| 0x%08"PFMT64x" %s %s\n", s->offset+s->size, 
-				r_str_rwx_i (s->rwx), s->name);
-			i++;
+		if (!sec->name) {
+			free (sec);
+			return NULL;
 		}
-		/* current seek */
-		if (i>0 && len != 0) {
-			if (seek == UT64_MAX)
-				seek = 0;
-			//len = 8096;//r_io_size (io);
-			io->printf ("=>  0x%08"PFMT64x" |", seek);
-			for (j=0;j<width;j++) {
-				io->printf (
-					((j*mul)+min >= seek &&
-					 (j*mul)+min <= seek+len)
-					?"^":"-");
-			}
-			io->printf ("| 0x%08"PFMT64x"\n", seek+len);
+		if (!r_id_pool_grab_id (io->sec_ids, &sec->id)) {
+			free (sec->name);
+			free (sec);
+			return NULL;
 		}
+		ls_append (io->sections, sec);
 	}
+	return sec;
 }
 
-R_API RIOSection *r_io_section_vget(RIO *io, ut64 addr) {
-	RListIter *iter;
+R_API RIOSection *r_io_section_get_i(RIO *io, ut32 id) {
+	SdbListIter *iter;
 	RIOSection *s;
-	r_list_foreach (io->sections, iter, s) {
-		if (addr >= s->vaddr && addr < s->vaddr + s->size)
-			return s;
+	if (!io || !io->sections) {
+		return NULL;
 	}
-	return NULL;
-}
-
-R_API RIOSection *r_io_section_getv(RIO *io, ut64 vaddr) {
-	RListIter *iter;
-	RIOSection *s;
-	r_list_foreach (io->sections, iter, s) {
-		if (vaddr >= s->vaddr && vaddr < s->vaddr + s->vsize)
-			return s;
-	}
-	return NULL;
-}
-
-R_API RIOSection *r_io_section_get(RIO *io, ut64 addr) {
-	RListIter *iter;
-	RIOSection *s;
-
-	//addr = r_io_section_vaddr_to_offset(io, addr);
-	r_list_foreach (io->sections, iter, s) {
-		if (addr >= s->offset && addr < s->offset + s->size) {
+	ls_foreach (io->sections, iter, s) {
+		if (s->id == id) {
 			return s;
 		}
 	}
 	return NULL;
 }
 
-R_API ut64 r_io_section_get_offset(RIO *io, ut64 addr) {
-	RIOSection *s = r_io_section_get(io, addr);
-	return s? s->offset: -1;
+R_API int r_io_section_rm(RIO *io, ut32 id) {
+	SdbListIter *iter;
+	RIOSection *s;
+	if (!io || !io->sections || !io->sec_ids) {
+		return false;
+	}
+	ls_foreach (io->sections, iter, s) {
+		if (s->id == id) {
+			ls_delete (io->sections, iter);
+			r_id_pool_kick_id (io->sec_ids, id);
+			return true;
+		}
+	}
+	return false;
 }
 
-R_API ut64 r_io_section_get_vaddr(RIO *io, ut64 offset) {
-	RIOSection *s = r_io_section_get (io, offset);
-	return s? s->vaddr: -1;
+//List return does not have assigned free function only 
+//the list will be freed. However, caller will might hold
+//an old reference
+R_API SdbList *r_io_section_bin_get(RIO *io, ut32 bin_id) {
+	SdbList *ret = NULL;
+	SdbListIter *iter;
+	RIOSection *s;
+	if (!io || !io->sections) {
+		return NULL;
+	}
+	ls_foreach (io->sections, iter, s) {
+		if (s->bin_id == bin_id) {
+			if (!ret) {
+				ret = ls_new ();
+			}
+			ls_prepend (ret, s);
+		}
+	}
+	return ret;
 }
 
-// TODO: deprecate
-R_API int r_io_section_get_rwx(RIO *io, ut64 offset) {
-	RIOSection *s = r_io_section_get (io, offset);
-	return s?s->rwx:R_IO_READ|R_IO_WRITE|R_IO_EXEC;
+R_API bool r_io_section_bin_rm(RIO *io, ut32 bin_id) {
+	RIOSection *s;
+	SdbListIter *iter, *niter;
+	int length;
+	if (!io || !io->sections || !io->sections->head || !io->sec_ids) {
+		return false;
+	}
+	length = ls_length (io->sections);
+	ls_foreach_safe (io->sections, iter, niter, s) {
+		if (s->bin_id == bin_id) {
+			r_id_pool_kick_id (io->sec_ids, s->id);
+			ls_delete (io->sections, iter);
+		}
+	}
+	return length != ls_length (io->sections);
 }
 
-R_API int r_io_section_overlaps(RIO *io, RIOSection *s) {
-	int i = 0;
-	RListIter *iter;
-	RIOSection *s2;
+R_API RIOSection *r_io_section_get_name(RIO *io, const char *name) {
+	RIOSection *s;
+	SdbListIter *iter;
+	if (!io || !name || !io->sections) {
+		return NULL;
+	}
+	ls_foreach (io->sections, iter, s) {
+		if (s->name && (!strcmp (s->name, name))) {
+			return s;
+		}
+	}
+	return NULL;
+}
 
-	r_list_foreach (io->sections, iter, s2) {
-		if (s != s2) {
-			if (s->offset >= s2->offset) {
-				if (s2->offset+s2->size < s->offset)
-					return i;
-			} else {
-				if (s->offset+s->size < s2->offset)
-					return i;
+R_API void r_io_section_cleanup(RIO *io) {
+	SdbListIter *iter, *ator;
+	RIOSection *s;
+	if (!io || !io->sections || !io->sec_ids) {
+		return;
+	}
+	if (!io->files) {
+		r_io_section_fini (io);
+		r_io_section_init (io);
+		return;
+	}
+	ls_foreach_safe (io->sections, iter, ator, s) {
+		if (!s) {
+			ls_delete (io->sections, iter);
+		} else if (!r_io_desc_get (io, s->fd)) {
+			r_id_pool_kick_id (io->sec_ids, s->id);
+			ls_delete (io->sections, iter);
+		} else {
+			if (!r_io_map_exists_for_id (io, s->filemap)) {
+				s->filemap = 0;
+			}
+			if (!r_io_map_exists_for_id (io, s->memmap)) {
+				s->memmap = 0;
 			}
 		}
-		i++;
 	}
-	return -1;
 }
 
-R_API ut64 r_io_section_vaddr_to_offset(RIO *io, ut64 vaddr) {
-	RListIter *iter;
+R_API SdbList *r_io_sections_get(RIO *io, ut64 paddr) {
+	SdbList *ret = NULL;
+	SdbListIter *iter;
 	RIOSection *s;
-
-	r_list_foreach (io->sections, iter, s) {
-		if (vaddr >= s->vaddr && vaddr < s->vaddr + s->vsize) {
-			/* XXX: Do we need this hack?
-			if (s->vaddr == 0) // hack
-				return vaddr;
-			*/
-			return (vaddr - s->vaddr + s->offset);
+	if (!io || !io->sections) {
+		return NULL;
+	}
+	ls_foreach (io->sections, iter, s) {
+		if (paddr >= s->paddr && paddr < (s->paddr + s->size)) {
+			if (!ret) {
+				ret = ls_new ();
+			}
+			ls_prepend (ret, s);
 		}
 	}
-	return vaddr;
+	return ret;
 }
 
-R_API ut64 r_io_section_offset_to_vaddr(RIO *io, ut64 offset) {
+R_API SdbList *r_io_sections_vget(RIO *io, ut64 vaddr) {
+	SdbList *ret = NULL;
+	SdbListIter *iter;
 	RIOSection *s;
-	RListIter *iter;
-	r_list_foreach (io->sections, iter, s) {
-		if (offset >= s->offset && offset < s->offset + s->size) {
-			/* XXX: Do we need this hack?
-			if (s->vaddr == 0) // hack
-				return offset;
-			*/
-			io->section = s;
-			return (s->vaddr + offset - s->offset);
+	if (!io || !io->sections) {
+		return NULL;
+	}
+	ls_foreach (io->sections, iter, s) {
+		if (vaddr >= s->vaddr && vaddr < (s->vaddr + s->vsize)) {
+			if (!ret) {
+				ret = ls_new ();
+			}
+			ls_prepend (ret, s);
 		}
+	}
+	return ret;
+}
+
+R_API RIOSection* r_io_section_vget(RIO *io, ut64 vaddr) {
+	if (io) {
+		SdbList *sects = r_io_sections_vget (io, vaddr);
+		RIOSection *ret = NULL;
+		if (sects) {
+			if (ls_length (sects)) {
+				ret = ls_pop (sects);
+			}
+		}
+		ls_free (sects);
+		return ret;
+	}
+	return NULL;
+}
+
+R_API RIOSection* r_io_section_get(RIO *io, ut64 vaddr) {
+	if (io) {
+		SdbList *sects = r_io_sections_get (io, vaddr);
+		RIOSection *ret = NULL;
+		if (sects) {
+			if (ls_length (sects)) {
+				ret = ls_pop (sects);
+			}
+		}
+		ls_free (sects);
+		return ret;
+	}
+	return NULL;
+}
+
+R_API ut64 r_io_section_get_vaddr_at(RIO *io, ut64 paddr) {
+	if (io) {
+		SdbList *sects = r_io_sections_vget (io, paddr);
+		ut64 ret = UT64_MAX;
+		if (sects) {
+			if (ls_length (sects)) {
+				RIOSection *s = ls_pop (sects);
+				ret = s->vaddr;
+			}
+		}
+		ls_free (sects);
+		return ret;
 	}
 	return UT64_MAX;
 }
 
-R_API ut64 r_io_section_next(RIO *io, ut64 o) {
-	int oset = 0;
-	ut64 newsec = 0LL;
-	RListIter *iter;
-	RIOSection *s;
-
-	r_list_foreach (io->sections, iter, s) {
-		ut64 addr = s->vaddr;
-		if (o < addr) {
-			if (newsec) {
-				if (addr<newsec)
-					newsec = addr;//s->offset;//addr;
-			} else newsec = addr; //s->offset; //addr;
-		}
-		if (o >= s->offset && o < (s->offset + s->size)) {
-			ut64 n = s->offset + s->size;
-			if (n>o) {
-				o = n;
-				oset = 1;
+R_API ut64 r_io_section_get_paddr_at(RIO *io, ut64 paddr) {
+	if (io) {
+		SdbList *sects = r_io_sections_get (io, paddr);
+		ut64 ret = UT64_MAX;
+		if (sects) {
+			if (ls_length (sects)) {
+				RIOSection *s = ls_pop (sects);
+				ret = s->paddr;
 			}
 		}
-		if (o >= s->vaddr && o < (s->vaddr + s->size)) {
-			ut64 n = s->vaddr + s->size;
-			if (n>o) {
-				o = n;
-				oset = 1;
-			}
-		}
+		ls_free (sects);
+		return ret;
 	}
-	//eprintf ("Newsec %d %llx\n", oset, newsec);
-	if (oset) return o;
-	return newsec? newsec: o;
+	return UT64_MAX;
 }
 
-R_API int r_io_section_set_archbits(RIO *io, ut64 addr, const char *arch, int bits) {
-	RIOSection *s = r_io_section_getv (io, addr);
-	if (!s) return R_FALSE;
+R_API int r_io_section_set_archbits(RIO *io, ut32 id, const char *arch, int bits) {
+	RIOSection *s;
+	if (!(s = r_io_section_get_i (io, id))) {
+		return false;
+	}
 	if (arch) {
 		s->arch = r_sys_arch_id (arch);
 		s->bits = bits;
 	} else {
-		s->arch = 0;
-		s->bits = 0;
+		s->arch = s->bits = 0;
 	}
-	return R_TRUE;
+	return true;
 }
 
-R_API const char *r_io_section_get_archbits(RIO* io, ut64 addr, int *bits) {
-	RIOSection *s = r_io_section_getv (io, addr);
-	if (!s || !s->bits || !s->arch) return NULL;
-	if (bits) *bits = s->bits;
-	return r_sys_arch_str (s->arch);
+R_API const char *r_io_section_get_archbits(RIO *io, ut64 vaddr, int *bits) {
+	//cache section so we avoid making so many looks up
+	// this may crash if we remove this section, we need a way to invalidate this cache
+	static RIOSection *s = NULL;
+	if (!s || (vaddr < s->vaddr) || (s->vaddr + s->vsize < vaddr)) {
+		s = r_io_section_vget (io, vaddr);
+	}
+	if (!s || !s->arch || !s->bits) {
+		return NULL;
+	}
+	if (s) {
+		if (bits) {
+			*bits = s->bits;
+		}
+		return r_sys_arch_str (s->arch);
+	}
+	return NULL;
+}
+
+R_API int r_io_section_bin_set_archbits(RIO *io, ut32 bin_id, const char *arch, int bits) {
+	SdbList *bin_sections;
+	SdbListIter *iter;
+	RIOSection *s;
+	if (!(bin_sections = r_io_section_bin_get (io, bin_id))) {
+		return false;
+	}
+	int a = arch? r_sys_arch_id (arch): 0;
+	if (a < 1) {
+		a = bits = 0;
+	}
+	ls_foreach (bin_sections, iter, s) {
+		s->arch = a;
+		s->bits = bits;
+	}
+	ls_free (bin_sections);
+	return true;
+}
+
+R_API bool r_io_section_priorize(RIO *io, ut32 id) {
+	SdbListIter *iter, *niter;
+	RIOSection *sec;
+	bool ret = false;
+	// assuming id = 0 is invalid
+	if (!id) {
+		return false;
+	}
+	if (!io || !io->sections) {
+		return false;
+	}
+	ls_foreach_safe (io->sections, iter, niter, sec) {
+		if (sec->id == id) {
+			ls_split_iter (io->sections, iter);
+			ls_append (io->sections, sec);
+			ret = true;
+			break;
+		}
+	}
+	if (!ret) {
+		return false;
+	}
+	if (sec->filemap) {
+		ret = r_io_map_priorize (io, sec->filemap);
+		if (!sec->memmap) {
+			return ret; 
+		}
+	}
+	if (sec->filemap != sec->memmap) {
+		return ret & r_io_map_priorize (io, sec->memmap);
+	}
+	return false;
+}
+
+R_API bool r_io_section_priorize_bin(RIO *io, ut32 bin_id) {
+	SdbList *secs;
+	SdbListIter *iter;
+	RIOSection *sec;
+	r_io_section_cleanup (io);
+	if (!(secs = r_io_section_bin_get (io, bin_id))) {
+		return false;
+	}
+	ls_foreach (secs, iter, sec) {
+		r_io_map_priorize (io, sec->filemap);
+		r_io_map_priorize (io, sec->memmap);
+	}
+	ls_free (secs);
+	return true;
+}
+
+
+
+static bool _section_apply_for_anal_patch(RIO *io, RIOSection *sec, bool patch) {
+	ut64 at;
+	if (sec->vsize > sec->size) {
+		// in that case, we just have to allocate some memory of the size (vsize-size)
+		if (!sec->memmap) {
+			// offset,where the memory should be mapped to
+			at = sec->vaddr + sec->size;
+			// TODO: harden this, handle mapslit
+			// craft the uri for the null-fd
+			if (!r_io_create_mem_map (io, sec, at, true, false)) {
+				return false;
+			}
+			// we need to create this map for transfering the flags, no real remapping here
+			if (!r_io_create_file_map (io, sec, sec->size, patch, false)) {
+				return false;
+			}
+			return true;
+		} else {
+			// the section is already applied
+			return false;
+		}
+	} else {
+		// same as above
+		if (!sec->filemap && r_io_create_file_map (io, sec, sec->vsize, patch, false)) {
+			return true;
+		}
+		return false;
+	}
+}
+
+static bool _section_apply_for_emul(RIO *io, RIOSection *sec) {
+	RIODesc *desc, *oldesc;
+	RIOMap *map;
+	char *uri;
+	size_t size;
+	ut8 *buf = NULL;
+	// if the section doesn't allow writing, we don't need to initialize writeable memory
+	if (!(sec->flags & R_IO_WRITE)) {
+		return _section_apply_for_anal_patch (io, sec, R_IO_SECTION_APPLY_FOR_ANALYSIS);
+	}
+	if (sec->memmap) {
+		return false;
+	}
+	size = (size_t) (sec->size > sec->vsize)? sec->vsize: sec->size;
+	// allocate a buffer for copying from sec->fd to the malloc-map
+	buf = calloc (1, size + 1);
+	if (!buf) {
+		return false;
+	}
+	// save the current desc
+	oldesc = io->desc;
+	// copy to the buffer
+	r_io_use_fd (io, sec->fd);
+	r_io_pread_at (io, sec->paddr, buf, (int)size);
+	// craft the uri for the opening the malloc-fd
+	uri = r_str_newf ("malloc://%"PFMT64u "", sec->vsize);
+	// open the malloc-fd and map it to vaddr
+	desc = r_io_open_at (io, uri, sec->flags, 664, sec->vaddr);
+	if (!desc) {
+		free (buf);
+		return false;
+	}
+	io->desc = desc;
+	// copy from buffer to the malloc-fd
+	r_io_pwrite_at (io, 0LL, buf, (int) size);
+	free (buf);
+	// get the malloc-map
+	if ((map = r_io_map_get (io, sec->vaddr))) {
+		map->name = r_str_newf ("mmap.%s", sec->name);
+		// set the flags correctly
+		map->flags = sec->flags;
+		// restore old RIODesc
+		io->desc = oldesc;
+		// let the section refere to the map
+		sec->filemap = sec->memmap = map->id;
+		return true;
+	}
+	io->desc = oldesc;
+	return false;
+}
+
+static bool _section_apply(RIO *io, RIOSection *sec, RIOSectionApplyMethod method) {
+	switch (method) {
+	case R_IO_SECTION_APPLY_FOR_PATCH:
+	case R_IO_SECTION_APPLY_FOR_ANALYSIS:
+		return _section_apply_for_anal_patch (io, sec, 
+					method == R_IO_SECTION_APPLY_FOR_ANALYSIS? false : true);
+	case R_IO_SECTION_APPLY_FOR_EMULATOR:
+		return _section_apply_for_emul (io, sec);
+	default:
+		return false;
+	}
+}
+
+R_API bool r_io_section_apply(RIO *io, ut32 id, RIOSectionApplyMethod method) {
+	RIOSection *sec = r_io_section_get_i (io, id);
+	return sec ? _section_apply (io, sec, method): false;
+}
+
+static bool _section_reapply_anal_or_patch(RIO *io, RIOSection *sec, RIOSectionApplyMethod method) {
+	SdbListIter *iter;
+	RIOMap *map;
+	RIODesc* desc;
+	if (!sec) {
+		return false;
+	}
+	if (sec->memmap) {
+		ls_foreach (io->maps, iter, map) {
+			if (map->id == sec->memmap) {
+				desc = r_io_desc_get (io, map->fd);
+				if (desc && desc->plugin && desc->plugin->close) {	//we can't use r_io_desc_close here, bc it breaks the section-list
+					desc->plugin->close (desc);
+					r_io_desc_del (io, map->fd);
+				}
+				sec->memmap = 0;
+				r_io_map_cleanup (io);
+				break;
+			}
+		}
+	}
+	r_io_map_del (io, sec->filemap);
+	sec->filemap = 0;
+	return _section_apply (io, sec, method);
+}
+
+static bool _section_reapply_for_emul(RIO *io, RIOSection *sec) {
+	RIOMap *map = NULL;
+	SdbListIter *iter;
+	char *uri;
+	ut8 *buf = NULL;
+	size_t size;
+	RIODesc *desc, *oldesc;
+	// in this case the section was applied for patching
+	if (sec->filemap != sec->memmap) {
+		if (!sec->memmap) {
+			r_io_map_del (io, sec->filemap);
+			sec->filemap = 0;
+			return _section_apply (io, sec, R_IO_SECTION_APPLY_FOR_EMULATOR);
+		}
+		ls_foreach (io->maps, iter, map) {
+			if (map->id == sec->memmap) {
+				break;
+			}
+		}
+		if (!map) {
+			r_io_map_del (io, sec->filemap);
+			sec->filemap = sec->memmap = 0;
+			return _section_apply (io, sec, R_IO_SECTION_APPLY_FOR_EMULATOR);
+		}
+		size = map->itv.size;
+		buf = calloc (1, size + 1);
+		if (!buf) {
+			return false;
+		}
+		oldesc = io->desc;
+		r_io_use_fd (io, map->fd);
+		r_io_pread_at (io, map->delta, buf, (int) size);
+		r_io_fd_close (io, map->fd);
+		if (sec->size > sec->vsize) {
+			size = 0;
+		} else if (size > (size_t) (sec->vsize - sec->size)) {
+			size = (size_t) (sec->vsize - sec->size);
+		}
+		uri = r_str_newf ("malloc://%"PFMT64u, sec->vsize);
+		r_io_open_at (io, uri, sec->flags | R_IO_WRITE, 664, sec->vaddr);
+		map = r_io_map_get (io, sec->vaddr);
+		if (map) {
+			(void)r_io_use_fd (io, map->fd);
+		}
+		r_io_pwrite_at (io, sec->size, buf, (int) size);
+		free (buf);
+		if (sec->size > sec->vsize) {
+			size = (size_t) sec->vsize;
+		} else {
+			size = (size_t) sec->size;
+		}
+		buf = calloc (1, size + 1);
+		if (!buf) {
+			io->desc = oldesc;
+			return false;
+		}
+		r_io_use_fd (io, sec->fd);
+		r_io_pread_at (io, sec->paddr, buf, (int) size);
+		if (map) {
+			(void)r_io_use_fd (io, map->fd);
+			sec->filemap = sec->memmap = map->id;
+		}
+		r_io_pwrite_at (io, 0LL, buf, (int) size);
+		free (buf);
+		io->desc = oldesc;
+		return true;
+	}
+	if (!sec->filemap) {
+		return _section_apply (io, sec, R_IO_SECTION_APPLY_FOR_EMULATOR);
+	}
+	ls_foreach (io->maps, iter, map) {
+		if (map->id == sec->memmap) {
+			break;
+		}
+	}
+	if (!map) {
+		return _section_apply (io, sec, R_IO_SECTION_APPLY_FOR_EMULATOR);
+	}
+	size = map->itv.size;
+	//save desc to restore later
+	desc = io->desc;
+	r_io_use_fd (io, map->fd);
+	buf = calloc (1, size + 1);
+	if (!buf) {
+		io->desc = desc;
+		return false;
+	}
+	r_io_pread_at (io, map->delta, buf, (int) size);
+	r_io_fd_close (io, map->fd);
+	r_io_map_cleanup (io);
+	if (sec->vsize < (ut64) size) {
+		size = (size_t) sec->vsize;
+	}
+	uri = r_str_newf ("malloc://%"PFMT64u, sec->vsize);
+	r_io_open_at (io, uri, sec->flags | R_IO_WRITE, 664, sec->vaddr);
+	map = r_io_map_get (io, sec->vaddr);
+	r_io_use_fd (io, map->fd);
+	r_io_pwrite_at (io, 0LL, buf, (int) size);
+	free (buf);
+	map->flags = sec->flags;
+	io->desc = desc;
+	return true;
+}
+
+static bool _section_reapply(RIO *io, RIOSection *sec, RIOSectionApplyMethod method) {
+	r_io_map_cleanup (io);
+	switch (method) {
+	case R_IO_SECTION_APPLY_FOR_PATCH:
+	case R_IO_SECTION_APPLY_FOR_ANALYSIS:
+		return _section_reapply_anal_or_patch (io, sec, method);
+	case R_IO_SECTION_APPLY_FOR_EMULATOR:
+		return _section_reapply_for_emul (io, sec);
+	default: 
+		return false;
+	}
+}
+
+R_API bool r_io_section_apply_bin(RIO *io, ut32 bin_id, RIOSectionApplyMethod method) {
+	RIOSection *sec;
+	SdbListIter *iter;
+	bool ret = false;
+	if (!io || !io->sections) {
+		return false;
+	}
+	ls_foreach_prev (io->sections, iter, sec) {
+		if (sec && (sec->bin_id == bin_id)) {
+			ret = true;
+			_section_apply (io, sec, method);
+		}
+	}
+	r_io_map_calculate_skyline (io);
+	return ret;
+}
+
+R_API bool r_io_section_reapply(RIO *io, ut32 id, RIOSectionApplyMethod method) {
+	RIOSection *sec;
+	if (!io || !io->sections || !io->maps) {
+		return false;
+	}
+	if (!(sec = r_io_section_get_i (io, id))) {
+		return false;
+	}
+	bool ret = _section_reapply (io, sec, method);
+	r_io_map_calculate_skyline (io);
+	return ret;
+}
+
+R_API bool r_io_section_reapply_bin(RIO *io, ut32 binid, RIOSectionApplyMethod method) {
+	RIOSection *sec;
+	SdbListIter *iter;
+	bool ret = false;
+	if (!io || !io->sections) {
+		return false;
+	}
+	ls_foreach_prev (io->sections, iter,  sec) {
+		if (sec && (sec->bin_id == binid)) {
+			ret = true;
+			_section_reapply (io, sec, method);
+		}
+	}
+	r_io_map_calculate_skyline (io);
+	return ret;
 }

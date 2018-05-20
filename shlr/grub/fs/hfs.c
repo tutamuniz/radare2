@@ -29,6 +29,7 @@
 #include <grub/types.h>
 #include <grub/hfs.h>
 #include <stdlib.h>
+#include <r_types.h>
 
 #define	GRUB_HFS_SBLOCK		2
 #define GRUB_HFS_EMBED_HFSPLUS_SIG 0x482B
@@ -55,6 +56,7 @@ enum grub_hfs_cnid_type
   };
 
 /* A node descriptor.  This is the header of every node.  */
+R_PACKED (
 struct grub_hfs_node
 {
   grub_uint32_t next;
@@ -63,9 +65,10 @@ struct grub_hfs_node
   grub_uint8_t level;
   grub_uint16_t reccnt;
   grub_uint16_t unused;
-} __attribute__ ((packed));
+});
 
 /* The head of the B*-Tree.  */
+R_PACKED (
 struct grub_hfs_treeheader
 {
   grub_uint16_t tree_depth;
@@ -79,7 +82,7 @@ struct grub_hfs_treeheader
   grub_uint32_t nodes;
   grub_uint32_t free_nodes;
   grub_uint8_t unused[76];
-} __attribute__ ((packed));
+});
 
 /* The state of a mounted HFS filesystem.  */
 struct grub_hfs_data
@@ -100,6 +103,7 @@ struct grub_hfs_data
 
 /* The key as used on disk in a catalog tree.  This is used to lookup
    file/directory nodes by parent directory ID and filename.  */
+R_PACKED (
 struct grub_hfs_catalog_key
 {
   grub_uint8_t unused;
@@ -110,11 +114,12 @@ struct grub_hfs_catalog_key
 
   /* Filename.  */
   grub_uint8_t str[31];
-} __attribute__ ((packed));
+});
 
 /* The key as used on disk in a extent overflow tree.  Using this key
    the extents can be looked up using a fileid and logical start block
    as index.  */
+R_PACKED (
 struct grub_hfs_extent_key
 {
   /* The kind of fork.  This is used to store meta information like
@@ -123,18 +128,20 @@ struct grub_hfs_extent_key
   grub_uint8_t forktype;
   grub_uint32_t fileid;
   grub_uint16_t first_block;
-} __attribute__ ((packed));
+});
 
 /* A directory record.  This is used to find out the directory ID.  */
+R_PACKED (
 struct grub_hfs_dirrec
 {
   /* For a directory, type == 1.  */
   grub_uint8_t type;
   grub_uint8_t unused[5];
   grub_uint32_t dirid;
-} __attribute__ ((packed));
+});
 
 /* Information about a file.  */
+R_PACKED (
 struct grub_hfs_filerec
 {
   /* For a file, type == 2.  */
@@ -148,7 +155,7 @@ struct grub_hfs_filerec
   /* The first 3 extents of the file.  The other extents can be found
      in the extent overflow file.  */
   grub_hfs_datarecord_t extents;
-} __attribute__ ((packed));
+});
 
 /* A record descriptor, both key and data, used to pass to call back
    functions.  */
@@ -306,7 +313,6 @@ grub_hfs_mount (grub_disk_t disk)
   struct grub_hfs_catalog_key key;
   struct grub_hfs_dirrec dir;
   int first_block;
-
   struct
   {
     struct grub_hfs_node node;
@@ -314,8 +320,9 @@ grub_hfs_mount (grub_disk_t disk)
   } treehead;
 
   data = grub_malloc (sizeof (struct grub_hfs_data));
-  if (!data)
+  if (!data) {
     return 0;
+	}
 
   /* Read the superblock.  */
   if (grub_disk_read (disk, GRUB_HFS_SBLOCK, 0,
@@ -326,6 +333,7 @@ grub_hfs_mount (grub_disk_t disk)
   if (grub_be_to_cpu16 (data->sblock.magic) != GRUB_HFS_MAGIC)
     {
       grub_error (GRUB_ERR_BAD_FS, "not an HFS filesystem");
+      eprintf ("not an HFS filesystem %x vs %x\n", GRUB_HFS_MAGIC, grub_be_to_cpu16(data->sblock.magic));
       goto fail;
     }
 
@@ -333,6 +341,7 @@ grub_hfs_mount (grub_disk_t disk)
   if (grub_be_to_cpu16 (data->sblock.embed_sig) == GRUB_HFS_EMBED_HFSPLUS_SIG)
     {
       grub_error (GRUB_ERR_BAD_FS, "embedded HFS+ filesystem");
+      eprintf ("embedded HFS+ filesystem");
       goto fail;
     }
 
@@ -370,6 +379,7 @@ grub_hfs_mount (grub_disk_t disk)
 			  0, (char *) &dir, sizeof (dir)) == 0)
     {
       grub_error (GRUB_ERR_BAD_FS, "cannot find the HFS root directory");
+      eprintf ("cannot find the HFS root directory");
       goto fail;
     }
 
@@ -667,16 +677,29 @@ grub_hfs_iterate_records (struct grub_hfs_data *data, int type, int idx, int thi
     grub_uint16_t offsets[nodesize / 2];
   } node;
 #else
+if (nodesize != 512) {
+eprintf ("Unhandled nodesize %d != 512\n", nodesize);
+	return grub_errno;
+}
   union
   {
     struct grub_hfs_node node;
-    char *rawnode;
-    grub_uint16_t *offsets; //[nodesize / 2];
+    char rawnode[512];
+    grub_uint16_t offsets[256];
   } node;
-#endif
 
+#if 0
 node.rawnode = malloc (nodesize);
+if (!node.rawnode) {
+  return grub_errno;
+}
 node.offsets = malloc ((nodesize*sizeof(grub_uint16_t))/2);
+eprintf ("SET FOFS %p\n", node.offsets);
+if (!node.offsets) {
+  return grub_errno;
+}
+#endif
+#endif
 
   do
     {
@@ -693,13 +716,12 @@ node.offsets = malloc ((nodesize*sizeof(grub_uint16_t))/2);
                             (type == 0) ? GRUB_HFS_CNID_CAT : GRUB_HFS_CNID_EXT,
 			    idx / (data->blksz / nodesize), 0);
       blk += (idx % (data->blksz / nodesize));
-      if (grub_errno)
+      if (grub_errno) {
 	return grub_errno;
+      }
 
       if (grub_disk_read (data->disk, blk, 0,
 			      sizeof (node), &node)) {
-	      free (node.rawnode);
-	      free (node.offsets);
 	      return grub_errno;
       }
 
@@ -707,11 +729,12 @@ node.offsets = malloc ((nodesize*sizeof(grub_uint16_t))/2);
       for (i = 0; i < grub_be_to_cpu16 (node.node.reccnt); i++)
 	{
 	  int pos = (nodesize >> 1) - 1 - i;
- 	  struct pointer
+	  R_PACKED (
+	  struct pointer
 	  {
 	    grub_uint8_t keylen;
 	    grub_uint8_t key;
-	  } __attribute__ ((packed)) *pnt;
+	  }) *pnt;
 	  pnt = (struct pointer *) (grub_be_to_cpu16 (node.offsets[pos])
 				    + node.rawnode);
 
@@ -725,17 +748,14 @@ node.offsets = malloc ((nodesize*sizeof(grub_uint16_t))/2);
 	    };
 
 	  if (node_hook (&node.node, &rec, closure)) {
-		  free (node.rawnode);
-		  free (node.offsets);
+		  // free (node.rawnode);
+		  // free (node.offsets);
 	    return 0;
 		}
 	}
 
       idx = grub_be_to_cpu32 (node.node.next);
     } while (idx && this);
-
-  free (node.rawnode);
-  free (node.offsets);
 
   return 0;
 }
@@ -815,11 +835,13 @@ grub_hfs_find_node (struct grub_hfs_data *data, char *key,
       c.found = -1;
 
       if (grub_hfs_iterate_records (data, type, idx, 0,
-				    grub_hfs_find_node_node_found, &c))
+				    grub_hfs_find_node_node_found, &c)) {
         return 0;
+	}
 
-      if (c.found == -1)
+      if (c.found == -1) {
         return 0;
+}
 
       idx = c.found;
     } while (! c.isleaf);
@@ -863,7 +885,7 @@ grub_hfs_iterate_dir_node_found (struct grub_hfs_node *hnd,
 }
 
 static int
-grub_hfs_iterate_dir_it_dir (struct grub_hfs_node *hnd __attribute ((unused)),
+grub_hfs_iterate_dir_it_dir (struct grub_hfs_node *hnd,
 			     struct grub_hfs_record *rec,
 			     void *closure)
 {

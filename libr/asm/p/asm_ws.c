@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2014 - condret	*/
+/* radare - LGPL - Copyright 2014 - condret */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -7,26 +7,24 @@
 #define WS_API static
 #include "../arch/whitespace/wsdis.c"
 
-int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
-	return wsdis(op, buf, len);
+static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
+	return wsdis (op, buf, len);
 }
 
 RAsmPlugin r_asm_plugin_ws = {
 	.name = "ws",
-	.desc = "Whitespace disassembly plugin",
+	.desc = "Whitespace esotheric VM",
 	.arch = "whitespace",
 	.license = "LGPL3",
 	.bits = 32,
-	.init = NULL,
-	.fini = NULL,
-	.disassemble = &disassemble,
-	.modify = NULL,
-	.assemble = NULL
+	.endian = R_SYS_ENDIAN_NONE,
+	.disassemble = &disassemble
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_ws
+	.data = &r_asm_plugin_ws,
+	.version = R2_VERSION
 };
 #endif

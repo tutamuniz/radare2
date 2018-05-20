@@ -22,10 +22,12 @@
 #include <grub/misc.h>
 #include <grub/disk.h>
 #include <grub/dl.h>
+#include <r_types.h>
 
 #ifndef MODE_USTAR
 /* cpio support */
 #define	MAGIC_BCPIO	070707
+R_PACKED(
 struct head
 {
   grub_uint16_t magic;
@@ -41,10 +43,12 @@ struct head
   grub_uint16_t namesize;
   grub_uint16_t filesize_1;
   grub_uint16_t filesize_2;
-} __attribute__ ((packed));
+});
 #else
 /* tar support */
 #define MAGIC_USTAR	"ustar"
+
+R_PACKED (
 struct head
 {
   char name[100];
@@ -63,7 +67,7 @@ struct head
   char devmajor[8];
   char devminor[8];
   char prefix[155];
-} __attribute__ ((packed));
+});
 #endif
 
 struct grub_cpio_data
@@ -165,18 +169,20 @@ grub_cpio_mount (grub_disk_t disk)
 {
   struct head hd;
   struct grub_cpio_data *data;
+  int test;
 
   if (grub_disk_read (disk, 0, 0, sizeof (hd), &hd))
     goto fail;
 
 #ifndef MODE_USTAR
   grub_cpio_convert_header (&hd);
-  if (hd.magic != MAGIC_BCPIO)
+  test = hd.magic != MAGIC_BCPIO;
 #else
-  if (grub_memcmp (hd.magic, MAGIC_USTAR,
-		   sizeof (MAGIC_USTAR) - 1))
+  test = grub_memcmp (hd.magic, MAGIC_USTAR,
+		   sizeof (MAGIC_USTAR) - 1);
 #endif
-    goto fail;
+    if (test)
+    	goto fail;
 
   data = (struct grub_cpio_data *) grub_malloc (sizeof (*data));
   if (!data)
@@ -205,14 +211,12 @@ grub_cpio_dir (grub_device_t device, const char *path,
 	       void *closure)
 {
   struct grub_cpio_data *data;
-  grub_uint32_t ofs;
-  char *prev, *name;
+  grub_uint32_t ofs = 0;
+  char *prev = NULL, *name = NULL;
   const char *np;
   int len;
 
   grub_dl_ref (my_mod);
-
-  prev = 0;
 
   data = grub_cpio_mount (device->disk);
   if (!data)
@@ -250,23 +254,28 @@ grub_cpio_dir (grub_device_t device, const char *path,
 	      info.dir = (p != NULL);
 
 	      hook (name + len, &info, closure);
-	      if (prev)
-		grub_free (prev);
+	      if (prev) {
+			grub_free (prev);
+			prev = NULL;
+	      }
 	      prev = name;
 	    }
-	  else
+	  else {
+if (prev == name) {
+prev = NULL;
+}
 	    grub_free (name);
+	    name = NULL;
+	  }
 	}
       data->hofs = ofs;
     }
 
 fail:
 
-  if (prev)
-    grub_free (prev);
+  grub_free (prev);
 
-  if (data)
-    grub_free (data);
+  grub_free (data);
 
   grub_dl_unref (my_mod);
 
@@ -276,8 +285,8 @@ fail:
 static grub_err_t
 grub_cpio_open (grub_file_t file, const char *name)
 {
-  struct grub_cpio_data *data;
-  grub_uint32_t ofs;
+  struct grub_cpio_data *data = NULL;
+  grub_uint32_t ofs = 0;
   char *fn = NULL;
   int i, j;
 

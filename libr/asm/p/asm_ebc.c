@@ -29,19 +29,17 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 RAsmPlugin r_asm_plugin_ebc = {
 	.name = "ebc",
 	.license = "LGPL3",
-	.desc = "EFI Byte Code disassembly plugin",
+	.desc = "EFI Bytecode",
 	.arch = "ebc",
 	.bits = 32|64,
-	.init = NULL,
-	.fini = NULL,
+	.endian = R_SYS_ENDIAN_LITTLE,
 	.disassemble = &disassemble,
-	.modify = NULL,
-	.assemble = NULL,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
-	.data = &r_asm_plugin_ebc
+	.data = &r_asm_plugin_ebc,
+	.version = R2_VERSION
 };
 #endif
